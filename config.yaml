@@ -1,0 +1,14 @@
+exchange: binance
+symbol: BTC/USDT
+timeframes:
+  - "1m"
+  - "15m"
+  - "1h"
+  - "4h"
+  - "1d"
+risk:
+  per_trade: 0.01
+  max_daily_drawdown: 0.03
+data:
+  max_candles: 500
+  cache_dir: data/cache

@@ -1,0 +1,25 @@
+name: "frankfurt_ib_50"
+version: "1.0"
+description: >
+  DAX (FDAX) breakout of the Frankfurt Initial Balance midpoint.
+  After the 08:00–09:00 Europe/Berlin IB closes, the first 1 m bar whose
+  close crosses the IB midpoint triggers an entry in that direction.
+  Target = 100 % IB projection.  SL = nearest confirmed swing.
+  Trade lifetime = end of the first London hour (10:00 Berlin).
+  One entry per session date, LONG or SHORT.
+
+instrument:
+  symbol: "FDAX"
+
+execution:
+  timeframe: "1m"
+  swing_length: 3          # 1m swing pivot length used for SL structure lookup
+
+session:
+  start: "08:00"           # Europe/Berlin local — IB start
+  tz: "Europe/Berlin"
+  ib_duration_minutes: 60
+  session_end: "10:00"     # Entry cutoff AND trade expiry
+
+risk:
+  per_trade: 0.01
