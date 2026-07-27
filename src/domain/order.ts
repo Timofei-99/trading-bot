@@ -53,6 +53,19 @@ export type JournalEvent =
       signal: SignalInit;
     }
   | {
+      /**
+       * The venue accepted the order and named it. Separate from
+       * `entry_placed` on purpose: between the two the reply may be lost, and
+       * the difference is exactly what tells a restart whether to ask the
+       * venue about this order or to forget it.
+       */
+      type: 'entry_acknowledged';
+      at: number;
+      orderId: string;
+      symbol: string;
+      exchangeOrderId: string;
+    }
+  | {
       type: 'entry_settled';
       at: number;
       orderId: string;

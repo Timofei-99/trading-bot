@@ -6,6 +6,7 @@ import { BacktestH1m3mCommand } from './backtest-h1-3m.command';
 import { BacktestOb4hCommand } from './backtest-ob4h.command';
 import { PaperCommand } from './paper.command';
 import { StrategiesCommand } from './strategies.command';
+import { TradeCommand } from './trade.command';
 import { VersionCommand } from './version.command';
 import { VisualizeCommand } from './visualize.command';
 
@@ -19,6 +20,7 @@ import { VisualizeCommand } from './visualize.command';
     BacktestFrankfurtCommand,
     BacktestH1m3mCommand,
     PaperCommand,
+    TradeCommand,
     VisualizeCommand,
   ],
 })

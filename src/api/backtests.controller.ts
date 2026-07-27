@@ -105,8 +105,32 @@ function summarize(record: RunRecord): RunSummary {
               : 'inf',
           },
     finalBalance: record.finalBalance,
-    error: record.error,
+    // A failure reason, not the raw exception text: `error.message` can carry
+    // filesystem paths and parsed file content, and this field crosses the
+    // HTTP boundary. The full message stays in the server log.
+    error: record.error === null ? null : summarizeError(record.error),
   };
+}
+
+const KNOWN_FAILURES: readonly [RegExp, string][] = [
+  [/^Unknown strategy:/, 'unknown strategy'],
+  [/^Unknown timeframe:/, 'unknown timeframe'],
+  [/needs csvPath/, 'this data source needs csvPath'],
+  [/^Unsupported timeframe for Yahoo Finance/, 'timeframe not supported by this data source'],
+  [/^No candles loaded/, 'no candles loaded for the base timeframe'],
+  [/MT5 export|MT5 timestamp/, 'could not parse the MT5 export'],
+  [/^Unknown ccxt exchange:/, 'unknown exchange'],
+  [/ENOENT|no such file/, 'input file not found'],
+  [/EACCES|permission denied/, 'input file not readable'],
+];
+
+function summarizeError(message: string): string {
+  for (const [pattern, summary] of KNOWN_FAILURES) {
+    if (pattern.test(message)) {
+      return summary;
+    }
+  }
+  return 'backtest failed; see server logs';
 }
 
 function serializeTrade(trade: Trade): Record<string, unknown> {

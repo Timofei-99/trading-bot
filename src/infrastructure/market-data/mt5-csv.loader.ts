@@ -85,7 +85,13 @@ export function parseMt5Csv(text: string, options: Mt5LoadOptions = {}): Mt5Load
 
   const column = (name: string): number => header.indexOf(name);
   if (column('date') < 0 || column('time') < 0) {
-    throw new Error(`Missing DATE/TIME columns; got ${JSON.stringify(header)}`);
+    // Deliberately reports the shape, not the content: this message travels
+    // out through the HTTP API, and the file being parsed is named by the
+    // caller — echoing its first line back would turn a parse failure into a
+    // file-disclosure primitive.
+    throw new Error(
+      `Missing DATE/TIME columns in the MT5 export (found ${header.length} columns)`,
+    );
   }
   for (const name of REQUIRED) {
     if (column(name) < 0) {
@@ -181,7 +187,9 @@ function parseWallTime(date: string, time: string): number {
   const day = /^\s*(\d{4})\.(\d{2})\.(\d{2})\s*$/.exec(date);
   const clock = /^\s*(\d{1,2}):(\d{2})(?::(\d{2}))?\s*$/.exec(time);
   if (day === null || clock === null) {
-    throw new Error(`Could not parse timestamp: ${JSON.stringify(`${date} ${time}`)}`);
+    // Same reasoning as the header check: describe the failure, never quote
+    // the bytes of a caller-named file.
+    throw new Error('Could not parse an MT5 timestamp; expected YYYY.MM.DD and HH:MM[:SS]');
   }
   return Date.UTC(
     Number(day[1]),

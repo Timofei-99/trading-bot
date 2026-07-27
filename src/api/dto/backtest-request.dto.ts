@@ -13,6 +13,8 @@ import {
   ValidateNested,
 } from 'class-validator';
 
+import { TIMEFRAME_MINUTES } from '../../domain/market-context';
+
 export class BacktestDataDto {
   @IsIn(['binance', 'yahoo', 'mt5'])
   source!: 'binance' | 'yahoo' | 'mt5';
@@ -20,8 +22,12 @@ export class BacktestDataDto {
   @IsString()
   symbol!: string;
 
+  /**
+   * Restricted to known timeframes: the value reaches a cache filename, and
+   * an unconstrained string there escapes the cache directory.
+   */
   @IsArray()
-  @IsString({ each: true })
+  @IsIn(Object.keys(TIMEFRAME_MINUTES), { each: true })
   timeframes!: string[];
 
   @IsISO8601()

@@ -340,6 +340,9 @@ export class PaperAdapter implements LiveExecutionPort {
         });
         return;
 
+      case 'entry_acknowledged':
+        return; // venue bookkeeping; paper has no venue
+
       case 'entry_settled': {
         const order = this.restingEntries.get(event.symbol);
         if (order === undefined) {

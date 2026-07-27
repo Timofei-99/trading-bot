@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 import { BarTuple, CandleSeries } from '../../domain/candle-series';
 
@@ -25,8 +25,17 @@ export class NdjsonCacheStore {
   constructor(readonly cacheDir: string) {}
 
   pathFor(key: CacheKey): string {
-    const safeSymbol = key.symbol.replace(/\//g, '_');
-    return join(this.cacheDir, `${key.source}_${safeSymbol}_${key.timeframe}.ndjson`);
+    // Every interpolated segment is sanitized, not just the symbol: these
+    // values can originate from an HTTP request, and one `..` would put the
+    // read (and eventually the write) outside the cache directory.
+    const name = [key.source, key.symbol, key.timeframe].map(safeSegment).join('_');
+    const path = resolve(join(this.cacheDir, `${name}.ndjson`));
+
+    const root = resolve(this.cacheDir);
+    if (path !== join(root, `${name}.ndjson`)) {
+      throw new Error(`Refusing a cache path outside ${root}: ${name}`);
+    }
+    return path;
   }
 
   has(key: CacheKey): boolean {
@@ -83,6 +92,11 @@ export class NdjsonCacheStore {
 }
 
 const FIELDS = ['time', 'open', 'high', 'low', 'close', 'volume'] as const;
+
+/** Anything that is not a plain filename character becomes an underscore. */
+function safeSegment(value: string): string {
+  return value.replace(/[^A-Za-z0-9.-]/g, '_');
+}
 
 /**
  * Refuse anything JSON cannot represent.

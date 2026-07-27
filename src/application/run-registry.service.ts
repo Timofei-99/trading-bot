@@ -74,6 +74,8 @@ export class RunRegistryService {
       record.status = 'completed';
     } catch (error) {
       record.error = error instanceof Error ? error.message : String(error);
+      // The full reason stays here; the HTTP layer only reports a summary.
+      console.error(`run ${record.id} failed: ${record.error}`);
       record.status = 'failed';
     } finally {
       record.finishedAtMs = Date.now();
