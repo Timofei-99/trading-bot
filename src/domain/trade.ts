@@ -1,6 +1,6 @@
 import { Direction, Signal } from './signal';
 
-export type ExitReason = 'tp' | 'sl' | 'expiry' | 'manual';
+export type ExitReason = 'tp' | 'sl' | 'expiry' | 'manual' | 'strategy';
 
 export interface TradeInit {
   readonly signal: Signal;

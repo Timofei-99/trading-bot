@@ -1,8 +1,9 @@
 import { CandleSeries } from './candle-series';
 import { MarketContext } from './market-context';
+import { EntryOrder, MarketSnapshot, SyncResult } from './order';
 import { Pattern } from './pattern';
 import { Direction, Signal } from './signal';
-import { Trade } from './trade';
+import { ExitReason, Trade } from './trade';
 
 /**
  * The contracts that keep the domain independent of the outside world.
@@ -68,6 +69,35 @@ export interface ExecutionPort {
   placeOrder(signal: Signal): string;
   getPosition(symbol: string): Position | null;
   closePosition(symbol: string): void;
+}
+
+/**
+ * The seam live-style execution plugs into — paper today, a real venue next.
+ *
+ * This is deliberately a SEPARATE port from the backtest's `ExecutionPort`,
+ * not an async version of it. The backtest port is a fill model driven by
+ * history and is parity-pinned; this one is an order-routing contract where a
+ * placed entry may rest, fill later, time out or be rejected. Strategies see
+ * neither — they emit Signals, and that is what makes the same strategy run
+ * unchanged under backtest, paper and live.
+ */
+export interface LiveExecutionPort {
+  /** Place the entry limit order for a signal. Rejects when already engaged on the symbol. */
+  placeEntry(signal: Signal): Promise<EntryOrder>;
+  /** Cancel a resting entry. Resolves to the cancelled order, or null if none rested. */
+  cancelEntry(symbol: string): Promise<EntryOrder | null>;
+  /**
+   * Settle state against the latest closed bar: fill or expire a resting
+   * entry, then run TP / SL / expiry on an open position.
+   */
+  sync(snapshot: MarketSnapshot): Promise<SyncResult>;
+  getRestingEntry(symbol: string): Promise<EntryOrder | null>;
+  /** The open position as the trade that opened it, or null. */
+  getPosition(symbol: string): Promise<Trade | null>;
+  getBalance(): Promise<number>;
+  getClosedTrades(): Promise<Trade[]>;
+  /** Market-close an open position (strategy exit, kill switch). */
+  closePosition(symbol: string, reason: ExitReason): Promise<Trade | null>;
 }
 
 // ---------------------------------------------------------------------------
