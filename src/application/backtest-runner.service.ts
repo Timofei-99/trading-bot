@@ -3,6 +3,7 @@ import { Injectable } from '@nestjs/common';
 import { CandleSeries } from '../domain/candle-series';
 import { MarketContext } from '../domain/market-context';
 import { Strategy } from '../domain/ports';
+import { RiskManager } from '../domain/risk-manager';
 import { Trade } from '../domain/trade';
 import { BacktestEngine } from '../engine/backtest.engine';
 import { BacktestAdapter, BacktestReport } from '../execution/backtest.adapter';
@@ -26,7 +27,18 @@ export interface BacktestRequest {
   readonly strategyParams?: Record<string, unknown>;
   readonly data: BacktestDataRequest;
   readonly engine?: { readonly baseTimeframe?: string; readonly window?: number };
-  readonly account?: { readonly initialBalance?: number; readonly riskPerTrade?: number };
+  readonly account?: {
+    readonly initialBalance?: number;
+    readonly riskPerTrade?: number;
+    /** Taker fee per side (Bybit spot: 0.001). Default 0 — gross PnL. */
+    readonly feeRate?: number;
+    /** Adverse fill on market-like exits (SL, expiry). Default 0. */
+    readonly slippage?: number;
+    /** Resolve a TP+SL bar against the trade. Default false. */
+    readonly worstCase?: boolean;
+    /** Daily realized-loss cap; entries pause for the rest of the UTC day. */
+    readonly maxDailyDrawdown?: number;
+  };
 }
 
 export interface BacktestOutcome {
@@ -78,13 +90,22 @@ export class BacktestRunnerService {
     }
 
     const strategy = this.strategies.create(request.strategy, request.strategyParams ?? {});
+    const riskPerTrade = request.account?.riskPerTrade ?? 0.01;
     const adapter = new BacktestAdapter({
       initialBalance: request.account?.initialBalance ?? 10_000,
-      riskPerTrade: request.account?.riskPerTrade ?? 0.01,
+      riskPerTrade,
+      feeRate: request.account?.feeRate,
+      slippage: request.account?.slippage,
+      worstCase: request.account?.worstCase,
     });
 
+    const maxDailyDrawdown = request.account?.maxDailyDrawdown;
     const report = new BacktestEngine(context, strategy, adapter, {
       window: request.engine?.window ?? 500,
+      riskManager:
+        maxDailyDrawdown === undefined
+          ? undefined
+          : new RiskManager(riskPerTrade, maxDailyDrawdown),
     }).run(baseTimeframe);
 
     return {

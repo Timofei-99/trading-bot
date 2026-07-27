@@ -15,6 +15,24 @@ export interface BacktestReport {
 export interface BacktestAdapterOptions {
   readonly initialBalance?: number;
   readonly riskPerTrade?: number;
+  /**
+   * Taker fee per side as a fraction of notional (Bybit spot: 0.001).
+   * Charged on both the entry and the exit notional when a trade closes.
+   * Default 0 keeps every number bit-identical to the fee-less code.
+   */
+  readonly feeRate?: number;
+  /**
+   * Adverse fill on MARKET-like exits (stop loss, expiry), as a fraction of
+   * price. Limit-like fills — the entry and the take profit — are not
+   * slipped: a limit order fills at its price or better. Default 0.
+   */
+  readonly slippage?: number;
+  /**
+   * Resolve a bar that spans both TP and SL against the trade (SL first)
+   * instead of the default optimistic TP-first. Use for stress runs; the
+   * default preserves the recorded historical behaviour.
+   */
+  readonly worstCase?: boolean;
 }
 
 /**
@@ -34,6 +52,9 @@ export interface BacktestAdapterOptions {
 export class BacktestAdapter implements ExecutionPort {
   balance: number;
   readonly riskPerTrade: number;
+  readonly feeRate: number;
+  readonly slippage: number;
+  readonly worstCase: boolean;
 
   private readonly openPositions = new Map<string, Trade>();
   private readonly closedTrades: Trade[] = [];
@@ -41,6 +62,9 @@ export class BacktestAdapter implements ExecutionPort {
   constructor(options: BacktestAdapterOptions = {}) {
     this.balance = options.initialBalance ?? 10_000;
     this.riskPerTrade = options.riskPerTrade ?? 0.01;
+    this.feeRate = options.feeRate ?? 0;
+    this.slippage = options.slippage ?? 0;
+    this.worstCase = options.worstCase ?? false;
   }
 
   placeOrder(signal: Signal): string {
@@ -57,6 +81,7 @@ export class BacktestAdapter implements ExecutionPort {
         entryTime: signal.timestamp,
         entryPrice: signal.entry,
         positionSize: size,
+        feeRate: this.feeRate,
       }),
     );
     return orderId;
@@ -111,19 +136,41 @@ export class BacktestAdapter implements ExecutionPort {
     const hitStopLoss =
       direction === Direction.Long ? candleLow <= stopLoss : candleHigh >= stopLoss;
 
-    if (hitTakeProfit) {
-      this.closeTrade(symbol, takeProfit, candleTime, 'tp');
-      return;
-    }
-    if (hitStopLoss) {
-      this.closeTrade(symbol, stopLoss, candleTime, 'sl');
-      return;
+    if (this.worstCase) {
+      // Stress mode: when a bar spans both levels, assume the stop was hit
+      // first. On a bar that reaches only one level this is identical to the
+      // default ordering.
+      if (hitStopLoss) {
+        this.closeTrade(symbol, this.slipped(stopLoss, direction), candleTime, 'sl');
+        return;
+      }
+      if (hitTakeProfit) {
+        this.closeTrade(symbol, takeProfit, candleTime, 'tp');
+        return;
+      }
+    } else {
+      if (hitTakeProfit) {
+        this.closeTrade(symbol, takeProfit, candleTime, 'tp');
+        return;
+      }
+      if (hitStopLoss) {
+        this.closeTrade(symbol, this.slipped(stopLoss, direction), candleTime, 'sl');
+        return;
+      }
     }
 
     if (expiryTime !== null && candleTime >= expiryTime) {
       const price = candleClose !== null ? candleClose : (candleHigh + candleLow) / 2;
-      this.closeTrade(symbol, price, candleTime, 'expiry');
+      this.closeTrade(symbol, this.slipped(price, direction), candleTime, 'expiry');
     }
+  }
+
+  /** Adverse fill on a market-like exit; a no-op while slippage is 0. */
+  private slipped(price: number, direction: Direction): number {
+    if (this.slippage === 0) {
+      return price;
+    }
+    return direction === Direction.Long ? price * (1 - this.slippage) : price * (1 + this.slippage);
   }
 
   get trades(): Trade[] {
@@ -225,6 +272,12 @@ export class BacktestAdapter implements ExecutionPort {
         : trade.positionSize * (trade.entryPrice - price);
 
     this.balance += dollarPnl;
+    if (this.feeRate !== 0) {
+      // Both sides of the round trip are charged at close. (An entry fee is
+      // really paid at fill; charging it here only misstates trades still
+      // open when a replay ends, which carry no fee at all.)
+      this.balance -= trade.positionSize * (trade.entryPrice + price) * this.feeRate;
+    }
     this.closedTrades.push(trade);
   }
 }

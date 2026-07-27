@@ -11,6 +11,10 @@ interface Ob4hOptions {
   window?: number;
   balance?: number;
   risk?: number;
+  fee?: number;
+  slippage?: number;
+  worstCase?: boolean;
+  maxDailyDd?: number;
 }
 
 /** Replaces `run_backtest.py` and `_run_2025.py`. */
@@ -39,8 +43,22 @@ export class BacktestOb4hCommand extends CommandRunner {
       strategy: 'OB_4h_FVG_15m',
       data: { source: 'binance', symbol, timeframes: ['4h', '15m'], startMs, endMs },
       engine: { baseTimeframe: '15m', window: options.window ?? 500 },
-      account: { initialBalance: balance, riskPerTrade: options.risk ?? 0.01 },
+      account: {
+        initialBalance: balance,
+        riskPerTrade: options.risk ?? 0.01,
+        feeRate: options.fee,
+        slippage: options.slippage,
+        worstCase: options.worstCase,
+        maxDailyDrawdown: options.maxDailyDd,
+      },
     });
+
+    if (options.fee || options.slippage || options.worstCase) {
+      console.log(
+        `  costs: fee=${options.fee ?? 0} per side, slippage=${options.slippage ?? 0}` +
+          `${options.worstCase ? ', worst-case bar resolution' : ''}`,
+      );
+    }
 
     for (const [timeframe, count] of Object.entries(outcome.barsByTimeframe)) {
       const span = BacktestRunnerService.span(outcome.context.candles(timeframe));
@@ -97,4 +115,45 @@ export class BacktestOb4hCommand extends CommandRunner {
   parseRisk(value: string): number {
     return Number.parseFloat(value);
   }
+
+  @Option({
+    flags: '--fee <fraction>',
+    description: 'Taker fee per side, e.g. 0.001 for Bybit spot (default 0)',
+  })
+  parseFee(value: string): number {
+    return parseFraction(value, '--fee');
+  }
+
+  @Option({
+    flags: '--slippage <fraction>',
+    description: 'Adverse fill on SL/expiry exits, e.g. 0.0005 (default 0)',
+  })
+  parseSlippage(value: string): number {
+    return parseFraction(value, '--slippage');
+  }
+
+  @Option({
+    flags: '--worst-case',
+    description: 'Resolve a bar that spans both TP and SL against the trade',
+  })
+  parseWorstCase(): boolean {
+    return true;
+  }
+
+  @Option({
+    flags: '--max-daily-dd <fraction>',
+    description: 'Pause entries for the day once realized loss exceeds this, e.g. 0.03',
+  })
+  parseMaxDailyDd(value: string): number {
+    return parseFraction(value, '--max-daily-dd');
+  }
+}
+
+/** A rate flag must be a small non-negative fraction, not a percentage. */
+function parseFraction(value: string, flag: string): number {
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed >= 0.5) {
+    throw new Error(`${flag}: expected a fraction in [0, 0.5), got ${JSON.stringify(value)}`);
+  }
+  return parsed;
 }

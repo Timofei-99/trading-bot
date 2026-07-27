@@ -1,10 +1,20 @@
 import { CandleSeries } from '../domain/candle-series';
 import { MarketContext } from '../domain/market-context';
 import { Strategy } from '../domain/ports';
+import { RiskManager } from '../domain/risk-manager';
 import { BacktestAdapter, BacktestReport } from '../execution/backtest.adapter';
+
+const DAY_MS = 86_400_000;
 
 export interface BacktestEngineOptions {
   readonly window?: number;
+  /**
+   * Account-level guard consulted before every order. With one configured,
+   * a signal is skipped once the day's realized PnL breaches the manager's
+   * daily-drawdown cap — the same idea as freqtrade's protections. Absent
+   * (the default), the loop is byte-identical to the unguarded engine.
+   */
+  readonly riskManager?: RiskManager;
 }
 
 /**
@@ -31,6 +41,7 @@ export interface BacktestEngineOptions {
  */
 export class BacktestEngine {
   readonly window: number;
+  private readonly riskManager: RiskManager | undefined;
 
   constructor(
     private readonly context: MarketContext,
@@ -39,6 +50,7 @@ export class BacktestEngine {
     options: BacktestEngineOptions = {},
   ) {
     this.window = options.window ?? 2000;
+    this.riskManager = options.riskManager;
   }
 
   run(baseTimeframe: string): BacktestReport {
@@ -65,7 +77,12 @@ export class BacktestEngine {
 
       const signal = this.strategy.checkEntry(slice);
       if (signal !== null && this.adapter.getPosition(symbol) === null) {
-        this.adapter.placeOrder(signal);
+        if (
+          this.riskManager === undefined ||
+          this.riskManager.validateSignal(signal, this.adapter.balance, this.dailyPnl(currentTime))
+        ) {
+          this.adapter.placeOrder(signal);
+        }
       }
 
       this.adapter.update(
@@ -78,5 +95,17 @@ export class BacktestEngine {
     }
 
     return this.adapter.report();
+  }
+
+  /** Realized PnL of trades closed on the same UTC day; only computed when a guard is set. */
+  private dailyPnl(nowMs: number): number {
+    const dayStart = Math.floor(nowMs / DAY_MS) * DAY_MS;
+    let total = 0;
+    for (const trade of this.adapter.trades) {
+      if (trade.exitTime !== null && trade.exitTime >= dayStart && trade.exitTime <= nowMs) {
+        total += trade.pnlPct ?? 0;
+      }
+    }
+    return total;
   }
 }

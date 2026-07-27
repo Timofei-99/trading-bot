@@ -233,4 +233,119 @@ describe('BacktestAdapter', () => {
     adapter.openTrades.pop();
     expect(adapter.openTrades).toHaveLength(1);
   });
+
+  describe('fees', () => {
+    it('nets the trade PnL: fee on both notionals, relative to entry', () => {
+      const adapter = new BacktestAdapter({ feeRate: 0.001 });
+      adapter.placeOrder(makeSignal(Direction.Long, 100, 90, 130));
+      adapter.update(SYMBOL, 135, 105, DAY2);
+
+      // gross 30% minus 0.001 * (1 + 130/100) = 0.0023.
+      expect(adapter.trades[0].pnlPct).toBeCloseTo(0.3 - 0.001 * (1 + 1.3), 12);
+      expect(adapter.trades[0].isWinner).toBe(true);
+    });
+
+    it('debits the balance for both sides of the round trip', () => {
+      const adapter = new BacktestAdapter({
+        initialBalance: 10_000,
+        riskPerTrade: 0.01,
+        feeRate: 0.001,
+      });
+      adapter.placeOrder(makeSignal(Direction.Long, 100, 90, 130));
+      adapter.update(SYMBOL, 135, 105, DAY2);
+
+      // 10 units: +300 pnl, minus 10 * (100 + 130) * 0.001 = 2.3 in fees.
+      expect(adapter.balance).toBeCloseTo(10_300 - 2.3, 9);
+    });
+
+    it('can turn a small gross winner into a net loser', () => {
+      const adapter = new BacktestAdapter({ feeRate: 0.001 });
+      // 0.1% gross target — smaller than the ~0.2% round-trip cost.
+      adapter.placeOrder(makeSignal(Direction.Long, 100, 99, 100.1));
+      adapter.update(SYMBOL, 100.2, 99.5, DAY2);
+
+      expect(adapter.trades[0].exitReason).toBe('tp');
+      expect(adapter.trades[0].pnlPct).toBeLessThan(0);
+      expect(adapter.trades[0].isWinner).toBe(false);
+    });
+
+    it('charges shorts the same way', () => {
+      const adapter = new BacktestAdapter({ feeRate: 0.001 });
+      adapter.placeOrder(makeSignal(Direction.Short, 100, 110, 70));
+      adapter.update(SYMBOL, 105, 65, DAY2);
+
+      expect(adapter.trades[0].pnlPct).toBeCloseTo(0.3 - 0.001 * (1 + 0.7), 12);
+    });
+  });
+
+  describe('slippage', () => {
+    it('worsens a stop-loss fill but never a take-profit fill', () => {
+      const slipped = new BacktestAdapter({ slippage: 0.001 });
+      slipped.placeOrder(makeSignal(Direction.Long, 100, 90, 130));
+      slipped.update(SYMBOL, 105, 85, DAY2);
+      expect(slipped.trades[0].exitPrice).toBeCloseTo(90 * 0.999, 12);
+
+      const takeProfit = new BacktestAdapter({ slippage: 0.001 });
+      takeProfit.placeOrder(makeSignal(Direction.Long, 100, 90, 130));
+      takeProfit.update(SYMBOL, 135, 105, DAY2);
+      expect(takeProfit.trades[0].exitPrice).toBe(130); // limit fills at its price
+    });
+
+    it('slips a short stop upward', () => {
+      const adapter = new BacktestAdapter({ slippage: 0.001 });
+      adapter.placeOrder(makeSignal(Direction.Short, 100, 110, 70));
+      adapter.update(SYMBOL, 112, 95, DAY2);
+
+      expect(adapter.trades[0].exitPrice).toBeCloseTo(110 * 1.001, 12);
+    });
+
+    it('worsens an expiry close', () => {
+      const adapter = new BacktestAdapter({ slippage: 0.001 });
+      adapter.placeOrder(makeSignal(Direction.Long, 100, 90, 130, DAY2));
+      adapter.update(SYMBOL, 120, 95, DAY2, 110);
+
+      expect(adapter.trades[0].exitReason).toBe('expiry');
+      expect(adapter.trades[0].exitPrice).toBeCloseTo(110 * 0.999, 12);
+    });
+  });
+
+  describe('worst-case bar resolution', () => {
+    it('resolves a bar that spans both levels against the trade', () => {
+      const adapter = new BacktestAdapter({ worstCase: true });
+      adapter.placeOrder(makeSignal(Direction.Long));
+      adapter.update(SYMBOL, 135, 85, DAY2);
+
+      expect(adapter.trades[0].exitReason).toBe('sl');
+    });
+
+    it('changes nothing on a bar that reaches only one level', () => {
+      const adapter = new BacktestAdapter({ worstCase: true });
+      adapter.placeOrder(makeSignal(Direction.Long));
+      adapter.update(SYMBOL, 135, 105, DAY2);
+
+      expect(adapter.trades[0].exitReason).toBe('tp');
+    });
+  });
+
+  it('with every option at its default, behaves bit-identically to explicit zeros', () => {
+    const run = (adapter: BacktestAdapter) => {
+      adapter.placeOrder(makeSignal(Direction.Long, 100, 90, 130));
+      adapter.update(SYMBOL, 135, 85, DAY2); // spans both levels
+      adapter.placeOrder(makeSignal(Direction.Long, 100, 90, 130));
+      adapter.update(SYMBOL, 105, 85, DAY3);
+      return {
+        balance: adapter.balance,
+        exits: adapter.trades.map((t) => [t.exitReason, t.exitPrice, t.pnlPct]),
+        report: adapter.report(),
+      };
+    };
+
+    const defaults = run(new BacktestAdapter({ initialBalance: 10_000 }));
+    const explicit = run(
+      new BacktestAdapter({ initialBalance: 10_000, feeRate: 0, slippage: 0, worstCase: false }),
+    );
+
+    expect(defaults).toEqual(explicit);
+    expect(defaults.exits[0][0]).toBe('tp'); // the recorded historical ordering
+  });
 });

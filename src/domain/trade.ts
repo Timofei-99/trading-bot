@@ -8,6 +8,11 @@ export interface TradeInit {
   readonly entryTime: number;
   readonly entryPrice: number;
   readonly positionSize: number;
+  /**
+   * Taker fee per side, as a fraction of notional (Bybit spot taker: 0.001).
+   * Zero — the default — keeps PnL gross, bit-identical to the pre-fee code.
+   */
+  readonly feeRate?: number;
 }
 
 /**
@@ -23,6 +28,7 @@ export class Trade {
   readonly entryTime: number;
   readonly entryPrice: number;
   readonly positionSize: number;
+  readonly feeRate: number;
 
   exitTime: number | null = null;
   exitPrice: number | null = null;
@@ -34,15 +40,29 @@ export class Trade {
     this.entryTime = init.entryTime;
     this.entryPrice = init.entryPrice;
     this.positionSize = init.positionSize;
+    this.feeRate = init.feeRate ?? 0;
   }
 
+  /**
+   * Net of fees when `feeRate` is set; gross otherwise.
+   *
+   * The fee is paid on both notionals (entry and exit), expressed here
+   * relative to the entry notional so the percentage stays comparable to the
+   * gross figure: `feeRate * (1 + exit/entry)`. Direction does not matter —
+   * both sides of a round trip are charged either way.
+   */
   get pnlPct(): number | null {
     if (this.exitPrice === null) {
       return null;
     }
-    return this.signal.direction === Direction.Long
-      ? (this.exitPrice - this.entryPrice) / this.entryPrice
-      : (this.entryPrice - this.exitPrice) / this.entryPrice;
+    const gross =
+      this.signal.direction === Direction.Long
+        ? (this.exitPrice - this.entryPrice) / this.entryPrice
+        : (this.entryPrice - this.exitPrice) / this.entryPrice;
+    if (this.feeRate === 0) {
+      return gross;
+    }
+    return gross - this.feeRate * (1 + this.exitPrice / this.entryPrice);
   }
 
   /** Profit in units of the risk taken (R multiple). */
