@@ -1,10 +1,10 @@
 import { CandleSeries } from '../domain/candle-series';
+import { dailyRealizedPnl, KillSwitch } from '../domain/kill-switch';
 import { MarketContext, TIMEFRAME_MINUTES } from '../domain/market-context';
+import { TradeJournalPort } from '../domain/order';
 import { LiveExecutionPort, MarketDataPort, Strategy } from '../domain/ports';
 import { RiskManager } from '../domain/risk-manager';
 import { Signal } from '../domain/signal';
-
-const DAY_MS = 86_400_000;
 
 /** Injectable time source, so the loop is testable without a wall clock. */
 export interface Clock {
@@ -26,6 +26,10 @@ export interface LiveEngineOptions {
   /** Wait after a candle boundary before fetching, letting the venue finalize the bar. */
   readonly graceMs?: number;
   readonly riskManager?: RiskManager;
+  /** Account-level stop that outranks the strategy and survives restarts. */
+  readonly killSwitch?: KillSwitch;
+  /** Where a halt is recorded, so a restart replays it. */
+  readonly journal?: TradeJournalPort;
   readonly clock?: Clock;
   readonly log?: (line: string) => void;
 }
@@ -35,6 +39,8 @@ export interface TickResult {
   readonly processedBar: number | null;
   readonly placedEntry: boolean;
   readonly closedTrades: number;
+  /** Set on the tick where the kill switch tripped. */
+  readonly halted?: string;
 }
 
 /**
@@ -63,6 +69,8 @@ export class LiveEngine {
   readonly graceMs: number;
 
   private readonly riskManager: RiskManager | undefined;
+  private readonly killSwitch: KillSwitch | undefined;
+  private readonly journal: TradeJournalPort | undefined;
   private readonly clock: Clock;
   private readonly log: (line: string) => void;
 
@@ -82,8 +90,24 @@ export class LiveEngine {
     this.window = options.window ?? 500;
     this.graceMs = options.graceMs ?? 3_000;
     this.riskManager = options.riskManager;
+    this.killSwitch = options.killSwitch;
+    this.journal = options.journal;
     this.clock = options.clock ?? SYSTEM_CLOCK;
     this.log = options.log ?? (() => undefined);
+
+    // A halt recorded before the process died must still be in force.
+    if (this.killSwitch !== undefined && this.journal !== undefined) {
+      for (const event of this.journal.readAll()) {
+        if (event.type === 'halted') {
+          this.killSwitch.halt(event.reason);
+        } else if (event.type === 'resumed') {
+          this.killSwitch.resume();
+        }
+      }
+      if (this.killSwitch.isHalted) {
+        this.log(`HALTED (restored): ${this.killSwitch.reason}`);
+      }
+    }
 
     for (const timeframe of this.timeframes) {
       this.timeframeMs(timeframe); // validate configuration up front
@@ -152,6 +176,10 @@ export class LiveEngine {
       }
     }
 
+    // Evaluate the account-level stop against what just closed, before
+    // considering any new entry.
+    const halted = await this.enforceKillSwitch(currentTime);
+
     let placedEntry = false;
     const position = await this.adapter.getPosition(this.symbol);
     if (position !== null) {
@@ -159,7 +187,10 @@ export class LiveEngine {
         await this.adapter.closePosition(this.symbol, 'strategy');
         this.log('strategy exit: position closed');
       }
-    } else if ((await this.adapter.getRestingEntry(this.symbol)) === null) {
+    } else if (
+      this.killSwitch?.isHalted !== true &&
+      (await this.adapter.getRestingEntry(this.symbol)) === null
+    ) {
       const signal = this.strategy.checkEntry(context);
       if (signal !== null && (await this.riskAllows(signal, currentTime))) {
         const order = await this.adapter.placeEntry(signal);
@@ -172,7 +203,46 @@ export class LiveEngine {
     }
 
     this.lastProcessed = currentTime;
-    return { processedBar: currentTime, placedEntry, closedTrades: syncResult.closed.length };
+    return {
+      processedBar: currentTime,
+      placedEntry,
+      closedTrades: syncResult.closed.length,
+      ...(halted === null ? {} : { halted }),
+    };
+  }
+
+  /**
+   * Trip the kill switch if the account has had enough for today.
+   *
+   * Halting cancels a resting entry — an order we placed but that has not
+   * filled is still ours to withdraw — but leaves an open position alone:
+   * its stop is already at the venue, and selling at market on the way out
+   * would realize a loss the stop might never have taken.
+   */
+  private async enforceKillSwitch(nowMs: number): Promise<string | null> {
+    if (this.killSwitch === undefined || this.killSwitch.isHalted) {
+      return null;
+    }
+    const closed = await this.adapter.getClosedTrades();
+    const reason = this.killSwitch.evaluate(closed, nowMs);
+    if (reason === null) {
+      return null;
+    }
+
+    this.killSwitch.halt(reason);
+    this.journal?.append({ type: 'halted', at: nowMs, reason });
+    this.log(`HALTED: ${reason} — no new entries until resumed`);
+
+    const resting = await this.adapter.getRestingEntry(this.symbol);
+    if (resting !== null) {
+      await this.adapter.cancelEntry(this.symbol);
+      this.log(`HALTED: cancelled resting entry ${resting.orderId}`);
+    }
+    const position = await this.adapter.getPosition(this.symbol);
+    if (position !== null) {
+      this.log('HALTED: an open position remains; its exits stay at the venue');
+    }
+    return reason;
   }
 
   /** Run until `stop()`: tick, then sleep to just past the next base-bar close. */
@@ -251,13 +321,7 @@ export class LiveEngine {
     if (this.riskManager === undefined) {
       return true;
     }
-    const dayStart = Math.floor(nowMs / DAY_MS) * DAY_MS;
-    let dailyPnl = 0;
-    for (const trade of await this.adapter.getClosedTrades()) {
-      if (trade.exitTime !== null && trade.exitTime >= dayStart && trade.exitTime <= nowMs) {
-        dailyPnl += trade.pnlPct ?? 0;
-      }
-    }
+    const dailyPnl = dailyRealizedPnl(await this.adapter.getClosedTrades(), nowMs);
     const allowed = this.riskManager.validateSignal(signal, await this.adapter.getBalance(), dailyPnl);
     if (!allowed) {
       this.log(`risk gate: entry skipped (daily pnl ${(dailyPnl * 100).toFixed(2)}%)`);

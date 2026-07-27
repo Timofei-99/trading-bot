@@ -45,6 +45,12 @@ export interface SyncResult {
 
 export type JournalEvent =
   | { type: 'session'; at: number; note: string; balance: number }
+  /**
+   * Trading stopped. Replayed on startup so a halted bot stays halted —
+   * a loss limit that a restart clears is not a loss limit.
+   */
+  | { type: 'halted'; at: number; reason: string }
+  | { type: 'resumed'; at: number; note: string }
   | {
       type: 'entry_placed';
       at: number;

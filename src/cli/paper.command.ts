@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { Command, CommandRunner, Option } from 'nest-commander';
 
 import { StrategyRegistryService } from '../application/strategy-registry.service';
+import { KillSwitch } from '../domain/kill-switch';
 import { RiskManager } from '../domain/risk-manager';
 import { Trade } from '../domain/trade';
 import { LiveEngine } from '../engine/live.engine';
@@ -22,6 +23,7 @@ interface PaperOptions {
   worstCase?: boolean;
   entryTimeout?: number;
   maxDailyDd?: number;
+  maxLosses?: number;
   journal?: string;
   once?: boolean;
 }
@@ -95,6 +97,14 @@ export class PaperCommand extends CommandRunner {
           options.maxDailyDd === undefined
             ? undefined
             : new RiskManager(options.risk ?? 0.01, options.maxDailyDd),
+        killSwitch:
+          options.maxDailyDd === undefined && options.maxLosses === undefined
+            ? undefined
+            : new KillSwitch({
+                maxDailyDrawdown: options.maxDailyDd,
+                maxConsecutiveLosses: options.maxLosses,
+              }),
+        journal,
         log: (line) => console.log(`[${new Date().toISOString()}] ${line}`),
       },
     );
@@ -205,12 +215,19 @@ export class PaperCommand extends CommandRunner {
 
   @Option({
     flags: '--max-daily-dd <fraction>',
-    description: 'Pause entries for the day once realized loss exceeds this',
+    description: 'Halt trading once the day realized this much loss, e.g. 0.03',
   })
   parseMaxDailyDd(value: string): number {
     return Number.parseFloat(value);
   }
 
+  @Option({
+    flags: '--max-losses <count>',
+    description: 'Halt trading after this many consecutive losing trades',
+  })
+  parseMaxLosses(value: string): number {
+    return Number.parseInt(value, 10);
+  }
 
   @Option({ flags: '--journal <path>', description: 'Journal file (default data/journal/…)' })
   parseJournal(value: string): string {

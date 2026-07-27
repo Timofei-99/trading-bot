@@ -4,6 +4,7 @@ import { ApplicationModule } from '../application/application.module';
 import { BacktestFrankfurtCommand } from './backtest-frankfurt.command';
 import { BacktestH1m3mCommand } from './backtest-h1-3m.command';
 import { BacktestOb4hCommand } from './backtest-ob4h.command';
+import { HaltCommand, ResumeCommand } from './halt.command';
 import { PaperCommand } from './paper.command';
 import { StrategiesCommand } from './strategies.command';
 import { TradeCommand } from './trade.command';
@@ -21,6 +22,8 @@ import { VisualizeCommand } from './visualize.command';
     BacktestH1m3mCommand,
     PaperCommand,
     TradeCommand,
+    HaltCommand,
+    ResumeCommand,
     VisualizeCommand,
   ],
 })

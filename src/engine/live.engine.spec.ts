@@ -1,5 +1,7 @@
 import { BarTuple, CandleSeries } from '../domain/candle-series';
+import { KillSwitch } from '../domain/kill-switch';
 import { MarketContext } from '../domain/market-context';
+import { JournalEvent, TradeJournalPort } from '../domain/order';
 import { CandleRequest, MarketDataPort, Strategy } from '../domain/ports';
 import { RiskManager } from '../domain/risk-manager';
 import { Direction, Signal } from '../domain/signal';
@@ -69,6 +71,41 @@ class OneShotStrategy extends Strategy {
 
   override checkExit(_context: MarketContext, trade: Trade): boolean {
     return this.exitOn !== null && trade.entryTime <= this.exitOn;
+  }
+}
+
+/** Signals on every bar, so a fresh entry can be resting when a loss lands. */
+class AlwaysSignalStrategy extends Strategy {
+  readonly name = 'always';
+  readonly version = '0';
+
+  checkEntry(context: MarketContext): Signal | null {
+    const series = context.candles('15m');
+    if (series.isEmpty) {
+      return null;
+    }
+    return new Signal({
+      symbol: SYMBOL,
+      direction: Direction.Long,
+      entry: 98,
+      stopLoss: 95,
+      takeProfit: 102,
+      timeframe: '15m',
+      timestamp: series.lastTime as number,
+      strategyName: this.name,
+      strategyVersion: this.version,
+    });
+  }
+}
+
+/** In-memory journal double. */
+class MemoryJournal implements TradeJournalPort {
+  readonly events: JournalEvent[] = [];
+  append(event: JournalEvent): void {
+    this.events.push(event);
+  }
+  readAll(): JournalEvent[] {
+    return [...this.events];
   }
 }
 
@@ -248,6 +285,125 @@ describe('LiveEngine', () => {
 
     expect(tick.placedEntry).toBe(false);
     expect(await adapter.getRestingEntry(SYMBOL)).toBeNull();
+  });
+
+  describe('kill switch', () => {
+    /** Fills at bar 5, stops out at bar 6 for a ~-5% loss. */
+    async function tradeThroughALoss(
+      killSwitch: KillSwitch,
+      journal?: MemoryJournal,
+    ): Promise<{ adapter: PaperAdapter; engine: LiveEngine; strategy: OneShotStrategy }> {
+      const rows = flatBars(12);
+      rows[5] = [100, 97.5]; // fills the 98 entry
+      rows[6] = [99, 94]; // takes out the 95 stop
+      const data = new ScriptedData({ '15m': series(rows) });
+      const strategy = new OneShotStrategy(bar(4));
+      const adapter = new PaperAdapter();
+      const engine = new LiveEngine(data, strategy, adapter, {
+        symbol: SYMBOL,
+        timeframes: ['15m'],
+        baseTimeframe: '15m',
+        window: 100,
+        killSwitch,
+        journal,
+      });
+
+      await engine.warmup(bar(4) + 1_000);
+      await engine.tick(bar(4) + M15 + 1_000); // entry placed
+      await engine.tick(bar(5) + M15 + 1_000); // filled
+      return { adapter, engine, strategy };
+    }
+
+    it('halts once the daily loss limit is breached', async () => {
+      const killSwitch = new KillSwitch({ maxDailyDrawdown: 0.03 });
+      const { engine } = await tradeThroughALoss(killSwitch);
+
+      const tick = await engine.tick(bar(6) + M15 + 1_000); // stop-out
+
+      expect(tick.halted).toMatch(/daily loss/);
+      expect(killSwitch.isHalted).toBe(true);
+    });
+
+    it('stops asking the strategy for entries once halted', async () => {
+      const killSwitch = new KillSwitch({ maxDailyDrawdown: 0.03 });
+      const { engine, strategy } = await tradeThroughALoss(killSwitch);
+      await engine.tick(bar(6) + M15 + 1_000);
+
+      const callsAtHalt = strategy.seenLastBars.length;
+      await engine.tick(bar(7) + M15 + 1_000);
+      await engine.tick(bar(8) + M15 + 1_000);
+
+      expect(strategy.seenLastBars.length).toBe(callsAtHalt);
+    });
+
+    it('cancels a resting entry when it trips', async () => {
+      const killSwitch = new KillSwitch({ maxDailyDrawdown: 0.03 });
+      const rows = flatBars(12);
+      rows[5] = [100, 97.5];
+      rows[6] = [99, 94];
+      const data = new ScriptedData({ '15m': series(rows) });
+      // Fires on every bar, so a fresh entry rests when the loss lands.
+      const strategy = new AlwaysSignalStrategy();
+      const adapter = new PaperAdapter();
+      const engine = new LiveEngine(data, strategy, adapter, {
+        symbol: SYMBOL,
+        timeframes: ['15m'],
+        baseTimeframe: '15m',
+        window: 100,
+        killSwitch,
+      });
+
+      await engine.warmup(bar(4) + 1_000);
+      await engine.tick(bar(4) + M15 + 1_000);
+      await engine.tick(bar(5) + M15 + 1_000);
+      await engine.tick(bar(6) + M15 + 1_000); // loss lands, switch trips
+
+      expect(killSwitch.isHalted).toBe(true);
+      expect(await adapter.getRestingEntry(SYMBOL)).toBeNull();
+    });
+
+    it('records the halt so a restart stays halted', async () => {
+      const journal = new MemoryJournal();
+      const killSwitch = new KillSwitch({ maxDailyDrawdown: 0.03 });
+      const { engine } = await tradeThroughALoss(killSwitch, journal);
+      await engine.tick(bar(6) + M15 + 1_000);
+
+      expect(journal.events.some((event) => event.type === 'halted')).toBe(true);
+
+      // A fresh process, reading the same journal.
+      const restarted = new KillSwitch({ maxDailyDrawdown: 0.03 });
+      new LiveEngine(
+        new ScriptedData({ '15m': series(flatBars(12)) }),
+        new OneShotStrategy(bar(99)),
+        new PaperAdapter(),
+        {
+          symbol: SYMBOL,
+          timeframes: ['15m'],
+          baseTimeframe: '15m',
+          killSwitch: restarted,
+          journal,
+        },
+      );
+
+      expect(restarted.isHalted).toBe(true);
+      expect(restarted.reason).toMatch(/daily loss/);
+    });
+
+    it('a recorded resume clears the halt on restart', async () => {
+      const journal = new MemoryJournal();
+      journal.append({ type: 'halted', at: bar(1), reason: 'manual' });
+      journal.append({ type: 'resumed', at: bar(2), note: 'operator' });
+
+      const killSwitch = new KillSwitch({ maxDailyDrawdown: 0.03 });
+      new LiveEngine(
+        new ScriptedData({ '15m': series(flatBars(6)) }),
+        new OneShotStrategy(bar(99)),
+        new PaperAdapter(),
+        { symbol: SYMBOL, timeframes: ['15m'], baseTimeframe: '15m', killSwitch, journal },
+      );
+
+      expect(killSwitch.isHalted).toBe(false);
+    });
   });
 
   it('rejects an unknown timeframe up front', () => {

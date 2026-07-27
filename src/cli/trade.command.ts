@@ -4,8 +4,11 @@ import { join } from 'node:path';
 import { Command, CommandRunner, Option } from 'nest-commander';
 
 import { StrategyRegistryService } from '../application/strategy-registry.service';
+import { KillSwitch } from '../domain/kill-switch';
 import { RiskManager } from '../domain/risk-manager';
 import { LiveEngine } from '../engine/live.engine';
+import { LoggedExchangeClient } from '../infrastructure/execution/logged-exchange-client';
+import { StructuredLogger } from '../infrastructure/logging/structured-logger';
 import {
   describeCredentials,
   loadExchangeCredentials,
@@ -23,6 +26,7 @@ interface TradeOptions {
   fee?: number;
   entryTimeout?: number;
   maxDailyDd?: number;
+  maxLosses?: number;
   journal?: string;
   live?: boolean;
   yes?: boolean;
@@ -72,21 +76,34 @@ export class TradeCommand extends CommandRunner {
     const journal = new NdjsonTradeJournal(journalPath);
     console.log(`journal: ${journalPath}`);
 
+    // Every exchange call and its outcome are written down; secrets are
+    // redacted by the logger, not by the caller.
+    const logger = new StructuredLogger({
+      filePath: journalPath.replace(/\.ndjson$/, '.log.ndjson'),
+      base: { symbol, strategy: strategyId, mode: credentials.sandbox ? 'testnet' : 'live' },
+    });
+
     const adapter = new BybitAdapter(
-      new CcxtExchangeClient({
-        exchangeId: credentials.exchangeId,
-        apiKey: credentials.apiKey,
-        secret: credentials.secret,
-        sandbox: credentials.sandbox,
-        category: credentials.category,
-      }),
+      new LoggedExchangeClient(
+        new CcxtExchangeClient({
+          exchangeId: credentials.exchangeId,
+          apiKey: credentials.apiKey,
+          secret: credentials.secret,
+          sandbox: credentials.sandbox,
+          category: credentials.category,
+        }),
+        logger,
+      ),
       {
         symbol,
         riskPerTrade: options.risk ?? 0.01,
         feeRate: options.fee ?? 0.001,
         entryTimeoutMs: (options.entryTimeout ?? 60) * 60_000,
         journal,
-        log: (line) => console.log(`[${new Date().toISOString()}] ${line}`),
+        log: (line) => {
+          console.log(`[${new Date().toISOString()}] ${line}`);
+          logger.info(line);
+        },
       },
     );
 
@@ -106,7 +123,18 @@ export class TradeCommand extends CommandRunner {
           options.maxDailyDd === undefined
             ? undefined
             : new RiskManager(options.risk ?? 0.01, options.maxDailyDd),
-        log: (line) => console.log(`[${new Date().toISOString()}] ${line}`),
+        killSwitch:
+          options.maxDailyDd === undefined && options.maxLosses === undefined
+            ? undefined
+            : new KillSwitch({
+                maxDailyDrawdown: options.maxDailyDd,
+                maxConsecutiveLosses: options.maxLosses,
+              }),
+        journal,
+        log: (line) => {
+          console.log(`[${new Date().toISOString()}] ${line}`);
+          logger.info(line);
+        },
       },
     );
 
@@ -168,12 +196,19 @@ export class TradeCommand extends CommandRunner {
 
   @Option({
     flags: '--max-daily-dd <fraction>',
-    description: 'Pause entries for the day once realized loss exceeds this',
+    description: 'Halt trading once the day realized this much loss, e.g. 0.03',
   })
   parseMaxDailyDd(value: string): number {
     return Number.parseFloat(value);
   }
 
+  @Option({
+    flags: '--max-losses <count>',
+    description: 'Halt trading after this many consecutive losing trades',
+  })
+  parseMaxLosses(value: string): number {
+    return Number.parseInt(value, 10);
+  }
 
   @Option({ flags: '--journal <path>', description: 'Journal file (default data/journal/…)' })
   parseJournal(value: string): string {
