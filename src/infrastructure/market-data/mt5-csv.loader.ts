@@ -21,11 +21,23 @@ export interface Mt5LoadResult {
   readonly ambiguousRows: number;
 }
 
+/**
+ * What to do with a bar whose wall-clock time occurs twice.
+ *
+ * `drop` (the default) reproduces the previous implementation exactly: the row
+ * survives in `rows` with no timestamp and is left out of `series`.
+ * `earlier` / `later` pick an occurrence and keep the bar replayable, and
+ * `throw` refuses the file. Naming the choice is the point — the old code made
+ * it implicitly and silently.
+ */
+export type AmbiguousPolicy = 'drop' | 'earlier' | 'later' | 'throw';
+
 export interface Mt5LoadOptions {
   /** Broker server timezone. Eurex publishes FDAX in Europe/Berlin. */
   readonly sourceTz?: string;
   /** Field separator; auto-detected from the header when omitted. */
   readonly separator?: string;
+  readonly ambiguousPolicy?: AmbiguousPolicy;
 }
 
 const REQUIRED = ['open', 'high', 'low', 'close'] as const;
@@ -47,16 +59,21 @@ const REQUIRED = ['open', 'high', 'low', 'close'] as const;
  *    first valid instant, which is the transition itself. Both 02:00 and 02:30
  *    on 2024-03-31 therefore become 03:00 local, and collide with a real 03:00
  *    row; the last one in the file wins.
- *  - An AMBIGUOUS wall time (during the fall-back hour) yields no timestamp at
- *    all. The Python loader left such rows in the frame with a NaT index, and
- *    `rows` reproduces that faithfully.
+ *  - An AMBIGUOUS wall time (during the fall-back hour) is resolved by
+ *    `ambiguousPolicy`. The default, `drop`, reproduces the Python loader,
+ *    which left such rows in the frame with a NaT index — `rows` is faithful
+ *    to that, down to their position at the end after sorting.
  *
- * `series` is the one deliberate departure: a bar with no timestamp cannot
- * take part in a time-ordered replay, so it is excluded there. Callers that
- * need byte-level fidelity with the old loader read `rows`.
+ * `series` is the one deliberate departure under `drop`: a bar with no
+ * timestamp cannot take part in a time-ordered replay, so it is excluded
+ * there. Callers that need byte-level fidelity with the old loader read
+ * `rows`; callers that would rather keep the bar pass `earlier` or `later`.
+ * `ambiguousRows` reports how many were affected either way, so the situation
+ * is never silent.
  */
 export function parseMt5Csv(text: string, options: Mt5LoadOptions = {}): Mt5LoadResult {
   const sourceTz = options.sourceTz ?? 'Europe/Berlin';
+  const ambiguousPolicy = options.ambiguousPolicy ?? 'drop';
 
   const lines = text.split(/\r?\n/).filter((line) => line.trim() !== '');
   if (lines.length === 0) {
@@ -97,8 +114,22 @@ export function parseMt5Csv(text: string, options: Mt5LoadOptions = {}): Mt5Load
     } else if (resolved.kind === 'nonexistent') {
       timestamp = resolved.shiftForwardUtcMs;
     } else {
-      timestamp = null;
       ambiguousRows += 1;
+      switch (ambiguousPolicy) {
+        case 'throw':
+          throw new Error(
+            `Line ${i + 1}: ${fields[column('date')]} ${fields[column('time')]} occurs twice in ` +
+              `${sourceTz} (daylight saving ends). Choose ambiguousPolicy 'earlier', 'later' or 'drop'.`,
+          );
+        case 'earlier':
+          timestamp = resolved.utcMs;
+          break;
+        case 'later':
+          timestamp = resolved.laterUtcMs;
+          break;
+        default:
+          timestamp = null;
+      }
     }
 
     parsed.push({

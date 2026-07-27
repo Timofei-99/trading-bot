@@ -82,6 +82,20 @@ describe('MarketContext', () => {
       expect(Array.from(ctx.candles('1m').close)).toEqual([2, 3]);
     });
 
+    it('leaves a slice handed out earlier untouched', () => {
+      // Slices are views over a shared buffer, so an in-place update would
+      // rewrite bars a caller had already read.
+      const ctx = context(['1m']);
+      const original = series([1, 2, 3]);
+      ctx.load('1m', original);
+      const held = ctx.candles('1m').slice(0, 3);
+
+      ctx.update('1m', candle(T0 + 2 * MINUTE, 999));
+
+      expect(Array.from(held.close)).toEqual([1, 2, 3]);
+      expect(Array.from(original.close)).toEqual([1, 2, 3]);
+      expect(Array.from(ctx.candles('1m').close)).toEqual([1, 2, 999]);
+    });
   });
 
   describe('isReady', () => {

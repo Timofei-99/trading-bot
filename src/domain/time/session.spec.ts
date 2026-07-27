@@ -85,4 +85,48 @@ describe('localWallTimeToUtcMs', () => {
     );
   });
 
+  describe('lenient policies, for derived times such as a session boundary', () => {
+    it('shifts a nonexistent wall time to the first real instant', () => {
+      // 02:30 Berlin does not exist on 2024-03-31; the clock jumps to 03:00,
+      // which is 01:00 UTC.
+      expect(
+        localWallTimeToUtcMs(
+          berlin,
+          '2024-03-31',
+          { hour: 2, minute: 30 },
+          { onNonexistent: 'shiftForward' },
+        ),
+      ).toBe(Date.UTC(2024, 2, 31, 1, 0));
+    });
+
+    it('picks an occurrence for an ambiguous wall time', () => {
+      const earlier = localWallTimeToUtcMs(
+        berlin,
+        '2024-10-27',
+        { hour: 2, minute: 30 },
+        { onAmbiguous: 'earlier' },
+      );
+      const later = localWallTimeToUtcMs(
+        berlin,
+        '2024-10-27',
+        { hour: 2, minute: 30 },
+        { onAmbiguous: 'later' },
+      );
+
+      expect(earlier).toBe(Date.UTC(2024, 9, 27, 0, 30)); // still CEST
+      expect(later).toBe(Date.UTC(2024, 9, 27, 1, 30)); // already CET
+      expect(later - earlier).toBe(3_600_000);
+    });
+
+    it('leaves an ordinary wall time alone', () => {
+      const strict = localWallTimeToUtcMs(berlin, '2024-06-03', { hour: 10, minute: 0 });
+      const lenient = localWallTimeToUtcMs(
+        berlin,
+        '2024-06-03',
+        { hour: 10, minute: 0 },
+        { onNonexistent: 'shiftForward', onAmbiguous: 'earlier' },
+      );
+      expect(lenient).toBe(strict);
+    });
+  });
 });

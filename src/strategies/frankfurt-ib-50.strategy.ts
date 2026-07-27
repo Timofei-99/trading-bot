@@ -156,7 +156,13 @@ export class FrankfurtIb50Strategy extends Strategy {
 
     const ibRange = ib.high - ib.low;
     const takeProfit = direction === Direction.Long ? ib.high + ibRange : ib.low - ibRange;
-    const expiry = localWallTimeToUtcMs(table, sessionDate, this.endTime);
+    // A session end is a derived time, not parsed input: on the one day a year
+    // it falls inside a daylight-saving gap, take the nearest real instant
+    // rather than aborting the whole replay.
+    const expiry = localWallTimeToUtcMs(table, sessionDate, this.endTime, {
+      onNonexistent: 'shiftForward',
+      onAmbiguous: 'earlier',
+    });
 
     state.entered = true;
 

@@ -57,7 +57,18 @@ export class CandleSourceService {
         if (request.csvPath === undefined) {
           throw new Error('An MT5 backtest needs csvPath');
         }
-        const { series } = loadMt5Csv(request.csvPath, { sourceTz: request.sourceTz });
+        const { series, rows, ambiguousRows } = loadMt5Csv(request.csvPath, {
+          sourceTz: request.sourceTz,
+        });
+        if (ambiguousRows > 0) {
+          // Never let this pass unnoticed: the bars exist in the file but not
+          // in the replay, and the counts would otherwise silently disagree.
+          console.warn(
+            `${request.csvPath}: ${ambiguousRows} of ${rows.length} bars fall in the repeated ` +
+              `daylight-saving hour and were left out of the replay. Pass ambiguousPolicy ` +
+              `'earlier' or 'later' to keep them.`,
+          );
+        }
         return series.between(request.startMs, request.endMs);
       }
 

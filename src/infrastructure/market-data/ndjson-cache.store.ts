@@ -40,12 +40,23 @@ export class NdjsonCacheStore {
     }
 
     const bars: BarTuple[] = [];
-    for (const line of readFileSync(path, 'utf8').split('\n')) {
+    const lines = readFileSync(path, 'utf8').split('\n');
+
+    for (let lineNumber = 0; lineNumber < lines.length; lineNumber++) {
+      const line = lines[lineNumber];
       if (line.trim() === '') {
         continue;
       }
-      const [time, open, high, low, close, volume] = JSON.parse(line) as number[];
-      bars.push([time, open, high, low, close, volume]);
+      const values = JSON.parse(line) as unknown[];
+      if (values.length !== 6) {
+        throw new Error(
+          `Corrupt cache line ${lineNumber + 1} in ${path}: expected 6 values, got ${values.length}`,
+        );
+      }
+      const bar = values.map((value, field) =>
+        assertFinite(value, `${path}:${lineNumber + 1}`, FIELDS[field]),
+      ) as unknown as BarTuple;
+      bars.push(bar);
     }
     return CandleSeries.fromBars(bars);
   }
@@ -56,17 +67,37 @@ export class NdjsonCacheStore {
 
     const lines: string[] = [];
     for (let i = 0; i < series.length; i++) {
-      lines.push(
-        JSON.stringify([
-          series.time[i],
-          series.open[i],
-          series.high[i],
-          series.low[i],
-          series.close[i],
-          series.volume[i],
-        ]),
-      );
+      const bar: BarTuple = [
+        series.time[i],
+        series.open[i],
+        series.high[i],
+        series.low[i],
+        series.close[i],
+        series.volume[i],
+      ];
+      bar.forEach((value, field) => assertFinite(value, `bar ${i}`, FIELDS[field]));
+      lines.push(JSON.stringify(bar));
     }
     writeFileSync(path, lines.length === 0 ? '' : `${lines.join('\n')}\n`, 'utf8');
   }
+}
+
+const FIELDS = ['time', 'open', 'high', 'low', 'close', 'volume'] as const;
+
+/**
+ * Refuse anything JSON cannot represent.
+ *
+ * `JSON.stringify(NaN)` is the string `null`, which reads back as a zero once
+ * it reaches a `Float64Array`. A price of zero passes straight through every
+ * stop-loss check and silently rewrites a backtest's statistics, so a bad
+ * value from a feed has to stop here rather than be persisted.
+ */
+function assertFinite(value: unknown, where: string, field: string): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new Error(
+      `Refusing a non-finite ${field} at ${where}: ${String(value)}. ` +
+        'JSON cannot round-trip NaN or Infinity, and a silent zero here would corrupt every run that reads this cache.',
+    );
+  }
+  return value;
 }

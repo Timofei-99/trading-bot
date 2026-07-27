@@ -108,6 +108,50 @@ describe('InitialBalanceDetector', () => {
     expect(ib.meta.mid).toBe((ib.high + ib.low) / 2);
   });
 
+  describe('sessions that straddle a daylight-saving transition', () => {
+    const overRepeatedHour = new InitialBalanceDetector({
+      sessionStart: '02:00',
+      durationMinutes: 60,
+      sessionTz: 'Europe/Berlin',
+      timeframe: '1m',
+    });
+
+    it('measures a real 60 minutes when the local hour happens twice', () => {
+      // Berlin turns the clock back on 2024-10-27, so 02:00-03:00 local occurs
+      // twice. Selecting bars by minute-of-day would match both passes and
+      // build the balance out of 120 minutes of data.
+      const bars = minuteCandles(Date.UTC(2024, 9, 26, 22, 0), 60 * 12);
+      const patterns = overRepeatedHour.detect(bars);
+
+      expect(patterns).toHaveLength(1);
+      const spanMinutes = ((patterns[0].endTime as number) - patterns[0].startTime) / MINUTE + 1;
+      expect(spanMinutes).toBe(60);
+      expect(patterns[0].meta.duration_minutes).toBe(60);
+      // The first pass, while the clock still reads CEST: 00:00 UTC.
+      expect(patterns[0].startTime).toBe(Date.UTC(2024, 9, 27, 0, 0));
+    });
+
+    it('shifts forward instead of vanishing when the local hour does not exist', () => {
+      // Berlin skips 02:00-03:00 on 2024-03-31 entirely.
+      const bars = minuteCandles(Date.UTC(2024, 2, 30, 22, 0), 60 * 12);
+      const patterns = overRepeatedHour.detect(bars);
+
+      expect(patterns).toHaveLength(1);
+      expect(patterns[0].meta.session_date).toBe('2024-03-31');
+      // The clock jumps straight to 03:00 local, which is 01:00 UTC.
+      expect(patterns[0].startTime).toBe(Date.UTC(2024, 2, 31, 1, 0));
+      const spanMinutes = ((patterns[0].endTime as number) - patterns[0].startTime) / MINUTE + 1;
+      expect(spanMinutes).toBe(60);
+    });
+
+    it('is unchanged for a session far from the transition', () => {
+      // The Frankfurt default sits at 08:00, so both days behave normally.
+      const marchBars = minuteCandles(Date.UTC(2024, 2, 31, 0, 0), 60 * 12);
+      const ib = new InitialBalanceDetector().detect(marchBars)[0];
+      expect(ib.startTime).toBe(Date.UTC(2024, 2, 31, 6, 0)); // 08:00 CEST
+      expect(ib.endTime).toBe(Date.UTC(2024, 2, 31, 6, 59));
+    });
+  });
 
   describe('validation', () => {
     it('rejects a malformed session start', () => {

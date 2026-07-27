@@ -39,16 +39,31 @@ export function compareHourMinute(a: HourMinute, b: HourMinute): number {
   return minuteOfDay(a) - minuteOfDay(b);
 }
 
+export interface WallTimePolicy {
+  /** Wall time swallowed by a spring-forward gap. */
+  readonly onNonexistent?: 'throw' | 'shiftForward';
+  /** Wall time that occurs twice during a fall-back hour. */
+  readonly onAmbiguous?: 'throw' | 'earlier' | 'later';
+}
+
 /**
  * Resolve `YYYY-MM-DD` + `HH:MM` in the table's zone to a UTC instant.
  *
- * Mirrors `pd.Timestamp(f"{date} {time}", tz=zone)`, which raises rather than
- * guessing when the wall time is ambiguous or does not exist.
+ * The default policy mirrors `pd.Timestamp(f"{date} {time}", tz=zone)`: raise
+ * rather than guess. That is right for parsing data, where a wall time that
+ * cannot exist means the input is wrong.
+ *
+ * It is the wrong default for a *derived* time such as a session boundary. A
+ * session that ends at 02:30 local is a perfectly sensible configuration; on
+ * one day a year that instant does not exist, and throwing there would abort
+ * an entire backtest over a calendar artefact. Those callers pass
+ * `shiftForward` / `earlier` and get the nearest real instant instead.
  */
 export function localWallTimeToUtcMs(
   table: ZoneOffsetTable,
   dateKey: string,
   time: HourMinute,
+  policy: WallTimePolicy = {},
 ): number {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateKey);
   if (match === null) {
@@ -58,12 +73,23 @@ export function localWallTimeToUtcMs(
     Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])) +
     minuteOfDay(time) * MINUTE_MS;
 
+  const clock = `${dateKey} ${time.hour}:${time.minute}`;
   const resolved = table.resolveLocal(localMs);
+
   if (resolved.kind === 'nonexistent') {
-    throw new Error(`${dateKey} ${time.hour}:${time.minute} does not exist in ${table.zone}`);
+    if ((policy.onNonexistent ?? 'throw') === 'throw' || resolved.shiftForwardUtcMs === null) {
+      throw new Error(`${clock} does not exist in ${table.zone}`);
+    }
+    return resolved.shiftForwardUtcMs;
   }
+
   if (resolved.kind === 'ambiguous') {
-    throw new Error(`${dateKey} ${time.hour}:${time.minute} is ambiguous in ${table.zone}`);
+    const choice = policy.onAmbiguous ?? 'throw';
+    if (choice === 'throw') {
+      throw new Error(`${clock} is ambiguous in ${table.zone}`);
+    }
+    return (choice === 'later' ? resolved.laterUtcMs : resolved.utcMs) as number;
   }
+
   return resolved.utcMs as number;
 }

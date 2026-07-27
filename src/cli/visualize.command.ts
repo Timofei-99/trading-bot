@@ -13,6 +13,7 @@ import { StructureDetector } from '../detectors/structure.detector';
 import { Pattern } from '../domain/pattern';
 import { renderChart } from '../infrastructure/visualization/chart.renderer';
 import { renderTrade } from '../infrastructure/visualization/trade-chart.renderer';
+import { assertRange, parseInstant, parseMonth } from './parse-time';
 
 interface VisualizeOptions {
   symbol?: string;
@@ -37,8 +38,9 @@ export class VisualizeCommand extends CommandRunner {
 
   async run(_args: string[], options: VisualizeOptions = {}): Promise<void> {
     const symbol = options.symbol ?? 'BTC/USDT';
-    const startMs = Date.parse(options.start ?? '2023-01-01T00:00:00Z');
-    const endMs = Date.parse(options.end ?? '2023-04-01T00:00:00Z');
+    const startMs = parseInstant(options.start ?? '2023-01-01', '--start');
+    const endMs = parseInstant(options.end ?? '2023-04-01', '--end');
+    assertRange(startMs, endMs);
     const top = options.top ?? 3;
 
     console.log(
@@ -70,9 +72,7 @@ export class VisualizeCommand extends CommandRunner {
     console.log(`\nDetected ${patterns.length} 4h patterns`);
 
     const month = options.chartMonth ?? '2023-02';
-    const chartStart = Date.parse(`${month}-01T00:00:00Z`);
-    const chartEnd = new Date(chartStart);
-    chartEnd.setUTCMonth(chartEnd.getUTCMonth() + 1);
+    const chartRange = parseMonth(month, '--chart-month');
 
     const chartPath = join(
       this.reports.ensureDir(),
@@ -83,8 +83,8 @@ export class VisualizeCommand extends CommandRunner {
       timeframe: '4h',
       patterns,
       trades: outcome.trades,
-      startMs: chartStart,
-      endMs: chartEnd.getTime(),
+      startMs: chartRange.startMs,
+      endMs: chartRange.endMs,
       title: `${symbol} 4h — ${month} — ${outcome.strategy.name}`,
       savePath: chartPath,
     });

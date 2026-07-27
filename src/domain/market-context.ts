@@ -75,23 +75,33 @@ export class MarketContext {
     return series.isEmpty ? null : series.close[series.length - 1];
   }
 
-  /** Append a bar, or replace the last one when the timestamp repeats. */
+  /**
+   * Append a bar, or replace the last one when the timestamp repeats.
+   *
+   * Always rebuilds the series rather than writing into it. `slice()` hands
+   * out views over the same buffer, so an in-place update would reach back
+   * through every view already given to a caller and change bars they had
+   * already read. Rebuilding costs a copy, and `update` is not on the replay
+   * path — the engine only ever calls `load`.
+   */
   update(timeframe: string, candle: Candle): void {
     const existing = this.data.get(timeframe) ?? CandleSeries.empty();
+    const bars = existing.toBars();
+    const bar: [number, number, number, number, number, number] = [
+      candle.time,
+      candle.open,
+      candle.high,
+      candle.low,
+      candle.close,
+      candle.volume,
+    ];
 
-    if (!existing.isEmpty && existing.lastTime === candle.time) {
-      const last = existing.length - 1;
-      existing.open[last] = candle.open;
-      existing.high[last] = candle.high;
-      existing.low[last] = candle.low;
-      existing.close[last] = candle.close;
-      existing.volume[last] = candle.volume;
-      this.data.set(timeframe, existing);
-      return;
+    if (bars.length > 0 && bars[bars.length - 1][0] === candle.time) {
+      bars[bars.length - 1] = bar;
+    } else {
+      bars.push(bar);
     }
 
-    const bars = existing.toBars();
-    bars.push([candle.time, candle.open, candle.high, candle.low, candle.close, candle.volume]);
     this.data.set(timeframe, CandleSeries.fromBars(bars).tail(this.maxCandles));
   }
 

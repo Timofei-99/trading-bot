@@ -73,4 +73,40 @@ describe('MT5 loader parity with the Python implementation', () => {
     expect(times).toEqual([...times].sort((a, b) => a - b));
   });
 
+  describe('ambiguousPolicy', () => {
+    it('defaults to the behaviour the fixture records', () => {
+      const explicit = parseMt5Csv(csv, {
+        sourceTz: expected.sourceTz,
+        ambiguousPolicy: 'drop',
+      });
+      expect(explicit.rows).toEqual(expected.rows);
+    });
+
+    it('keeps the bar when asked to pick an occurrence', () => {
+      for (const policy of ['earlier', 'later'] as const) {
+        const kept = parseMt5Csv(csv, { sourceTz: expected.sourceTz, ambiguousPolicy: policy });
+
+        expect(kept.ambiguousRows).toBe(expected.natRows);
+        expect(kept.rows.every((row) => row.timestamp !== null)).toBe(true);
+        expect(kept.series.length).toBe(kept.rows.length);
+      }
+    });
+
+    it('places the two occurrences an hour apart', () => {
+      const earlier = parseMt5Csv(csv, { sourceTz: expected.sourceTz, ambiguousPolicy: 'earlier' });
+      const later = parseMt5Csv(csv, { sourceTz: expected.sourceTz, ambiguousPolicy: 'later' });
+
+      // The 02:30 bar on 2024-10-27: 00:30 UTC while still CEST, 01:30 after.
+      const findByOpen = (rows: { timestamp: number | null; open: number }[]): number =>
+        rows.find((row) => row.open === 19002)?.timestamp as number;
+
+      expect(findByOpen(later.rows) - findByOpen(earlier.rows)).toBe(3_600_000);
+    });
+
+    it('refuses the file outright when told to', () => {
+      expect(() =>
+        parseMt5Csv(csv, { sourceTz: expected.sourceTz, ambiguousPolicy: 'throw' }),
+      ).toThrow(/occurs twice in Europe\/Berlin/);
+    });
+  });
 });

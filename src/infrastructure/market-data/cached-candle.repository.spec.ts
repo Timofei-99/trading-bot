@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -201,5 +201,35 @@ describe('NdjsonCacheStore', () => {
     const store = new NdjsonCacheStore(cacheDir);
     store.write(key, CandleSeries.empty());
     expect(store.read(key)?.isEmpty).toBe(true);
+  });
+
+  describe('non-finite values', () => {
+    it('refuses to persist a NaN rather than storing a silent zero', () => {
+      const store = new NdjsonCacheStore(cacheDir);
+      expect(() => store.write(key, CandleSeries.fromBars([[T0, 1, NaN, 3, 4, 5]]))).toThrow(
+        /Refusing a non-finite high at bar 0/,
+      );
+      expect(store.has(key)).toBe(false);
+    });
+
+    it('refuses an Infinity too', () => {
+      const store = new NdjsonCacheStore(cacheDir);
+      expect(() =>
+        store.write(key, CandleSeries.fromBars([[T0, 1, 2, 3, Number.POSITIVE_INFINITY, 5]])),
+      ).toThrow(/Refusing a non-finite close/);
+    });
+
+    it('refuses to read a file that already contains one', () => {
+      const store = new NdjsonCacheStore(cacheDir);
+      // What a cache written before this check looked like.
+      writeFileSync(store.pathFor(key), `[${T0},1,null,3,4,5]\n`, 'utf8');
+      expect(() => store.read(key)).toThrow(/Refusing a non-finite high/);
+    });
+
+    it('refuses a truncated line', () => {
+      const store = new NdjsonCacheStore(cacheDir);
+      writeFileSync(store.pathFor(key), `[${T0},1,2]\n`, 'utf8');
+      expect(() => store.read(key)).toThrow(/expected 6 values, got 3/);
+    });
   });
 });

@@ -1,10 +1,11 @@
 import { CandleSeries } from '../domain/candle-series';
 import { Pattern, PatternType } from '../domain/pattern';
 import { Detector } from '../domain/ports';
-import { HourMinute, minuteOfDay, parseHhMm } from '../domain/time/session';
+import { HourMinute, localWallTimeToUtcMs, minuteOfDay, parseHhMm } from '../domain/time/session';
 import { ZoneOffsetTable } from '../domain/time/zone-offset-table';
 
 const MINUTES_PER_DAY = 24 * 60;
+const MINUTE_MS = 60_000;
 
 export interface InitialBalanceOptions {
   readonly sessionStart?: string;
@@ -23,6 +24,16 @@ export interface InitialBalanceOptions {
  * daylight-saving shift is the whole reason the window is expressed locally
  * and why this detector goes through `ZoneOffsetTable` rather than UTC hours
  * like `KillzoneDetector`.
+ *
+ * The window is resolved to an INSTANT per day — the session's opening wall
+ * time converted to UTC, plus the duration — rather than by filtering bars on
+ * their minute-of-day. The two agree on every ordinary day and differ on the
+ * two that matter: on the fall-back day a minute-of-day filter would match
+ * both passes of the repeated hour and quietly build a 60-minute balance out
+ * of 120 minutes of bars, and on the spring-forward day a window inside the
+ * gap would match nothing at all and emit no pattern without a word. Resolving
+ * the instant instead gives a real 60 minutes in the first case and shifts to
+ * the first valid instant in the second.
  *
  * One pattern per local calendar day that has at least one candle in the
  * window. `high` / `low` are wick-based.
@@ -69,30 +80,32 @@ export class InitialBalanceDetector implements Detector {
     );
 
     const { time, high, low } = candles;
-    const byDay = new Map<string, number[]>();
 
+    // Every local calendar day the data touches. `YYYY-MM-DD` sorts
+    // lexicographically in chronological order.
+    const days = new Set<string>();
     for (let i = 0; i < candles.length; i++) {
-      const localMinute = table.localMinuteOfDay(time[i]);
-      if (localMinute < startMinute || localMinute >= endMinute) {
-        continue;
-      }
-      const day = table.localDateKey(time[i]);
-      const bucket = byDay.get(day);
-      if (bucket === undefined) {
-        byDay.set(day, [i]);
-      } else {
-        bucket.push(i);
-      }
+      days.add(table.localDateKey(time[i]));
     }
 
     const patterns: Pattern[] = [];
-    // `YYYY-MM-DD` sorts lexicographically in chronological order.
-    for (const day of [...byDay.keys()].sort()) {
-      const indices = byDay.get(day) as number[];
+
+    for (const day of [...days].sort()) {
+      const openMs = localWallTimeToUtcMs(table, day, this.start, {
+        onNonexistent: 'shiftForward',
+        onAmbiguous: 'earlier',
+      });
+      const closeMs = openMs + this.durationMinutes * MINUTE_MS;
+
+      const from = candles.searchSortedLeft(openMs);
+      const to = candles.searchSortedLeft(closeMs);
+      if (from >= to) {
+        continue;
+      }
 
       let sessionHigh = -Infinity;
       let sessionLow = Infinity;
-      for (const i of indices) {
+      for (let i = from; i < to; i++) {
         if (high[i] > sessionHigh) {
           sessionHigh = high[i];
         }
@@ -105,8 +118,8 @@ export class InitialBalanceDetector implements Detector {
         new Pattern({
           type: PatternType.InitialBalance,
           timeframe: this.timeframe,
-          startTime: time[indices[0]],
-          endTime: time[indices[indices.length - 1]],
+          startTime: time[from],
+          endTime: time[to - 1],
           high: sessionHigh,
           low: sessionLow,
           meta: {

@@ -1,6 +1,7 @@
 import { Command, CommandRunner, Option } from 'nest-commander';
 
 import { BacktestRunnerService } from '../application/backtest-runner.service';
+import { assertRange, parseInstant } from './parse-time';
 import { formatBacktestReport } from './report-format';
 
 interface Ob4hOptions {
@@ -24,8 +25,9 @@ export class BacktestOb4hCommand extends CommandRunner {
 
   async run(_args: string[], options: Ob4hOptions = {}): Promise<void> {
     const symbol = options.symbol ?? 'BTC/USDT';
-    const startMs = Date.parse(options.start ?? '2023-01-01T00:00:00Z');
-    const endMs = Date.parse(options.end ?? '2024-01-01T00:00:00Z');
+    const startMs = parseInstant(options.start ?? '2023-01-01', '--start');
+    const endMs = parseInstant(options.end ?? '2024-01-01', '--end');
+    assertRange(startMs, endMs);
     const balance = options.balance ?? 10_000;
 
     console.log(
