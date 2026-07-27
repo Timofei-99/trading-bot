@@ -1,82 +1,500 @@
 # trading-bot
 
-Toolkit for building and running ICT / Smart Money Concepts trading strategies: a look-ahead-free backtest engine, composable pattern detectors, dry-run paper trading on live data, and live execution against Bybit spot.
+Конструктор торговых стратегий на концепциях ICT / Smart Money: бэктест-движок без заглядывания в будущее, готовые детекторы паттернов, режим бумажной торговли на живых данных и исполнение через Bybit (спот).
 
-You write the strategy; the toolkit runs it — unchanged — under backtest, paper and live.
+Вы пишете стратегию — инструмент запускает её **без единого изменения** в бэктесте, на бумаге и на бирже. Меняется только исполнитель.
+
+---
+
+## Оглавление
+
+1. [Что нужно перед стартом](#1-что-нужно-перед-стартом)
+2. [Установка за пять минут](#2-установка-за-пять-минут)
+3. [Проверка, что всё работает](#3-проверка-что-всё-работает)
+4. [Бэктесты](#4-бэктесты)
+5. [Графики](#5-графики)
+6. [Своя стратегия — пошагово](#6-своя-стратегия--пошагово)
+7. [Бумажная торговля](#7-бумажная-торговля-paper)
+8. [Bybit: тестнет](#8-bybit-тестнет)
+9. [Реальные деньги](#9-реальные-деньги)
+10. [Как остановить бота](#10-как-остановить-бота)
+11. [HTTP API](#11-http-api)
+12. [Где что лежит](#12-где-что-лежит)
+13. [Если что-то пошло не так](#13-если-что-то-пошло-не-так)
+
+---
+
+## 1. Что нужно перед стартом
+
+| Требование | Проверить |
+|---|---|
+| Node.js 22+ | `node -v` |
+| npm 10+ | `npm -v` |
+| Git | `git --version` |
+
+Ничего больше — ни Python, ни базы данных, ни Docker. Для бэктестов интернет не нужен (данные лежат в репозитории), для бумажной и реальной торговли — нужен.
+
+## 2. Установка за пять минут
 
 ```bash
-npm install
-npm run seed-cache                   # fill the candle cache from committed fixtures
+git clone <адрес репозитория>
+cd trading-bot
+npm install          # ~1 минута
+npm run seed-cache   # заполнить кэш свечей из фикстур в репозитории
+```
+
+`seed-cache` кладёт в `data/cache/` годовую историю BTC/USDT (4h и 15m), поэтому первый бэктест запустится офлайн и мгновенно.
+
+Проверьте, что CLI отвечает:
+
+```bash
 npm run cli -- --help
 ```
 
-## The three modes
+> **Важно про `--`.** Всё, что идёт после `--`, npm передаёт программе, а не себе. `npm run cli -- paper --once` — правильно; `npm run cli paper --once` — флаг потеряется.
 
-| Mode | Command | Data | Money |
-|---|---|---|---|
-| Backtest | `npm run cli -- backtest:ob4h --fee 0.001` | history | none |
-| Paper (dry run) | `npm run cli -- paper` | live | none, simulated fills |
-| Live | `npm run cli -- trade` | live | **testnet** by default |
+## 3. Проверка, что всё работает
 
-Always judge a strategy with costs on. The gross backtest flatters everything: a year of BTC on the bundled strategy reads −0.62% gross and **−30.6% with Bybit's 0.1% spot taker fee**.
-
-## Writing a strategy
-
-1. `src/strategies/my.strategy.ts` — extend `Strategy`, implement `checkEntry(context): Signal | null`. Use `context.candles('15m')` and any detector from `src/detectors/`. `Signal.entry` must be a level derived from *earlier* bars, never the current bar's OHLC.
-2. Add one entry to `BUILT_IN_STRATEGIES` in `src/application/strategy-registry.service.ts`.
-3. Run it: `npm run cli -- paper --strategy MY_ID --params '{"minRr":3}'`.
-
-See `CLAUDE.md` for the architecture and the invariants worth preserving.
-
-## Live trading
-
-Credentials come from the environment. Nothing else reads them, and the secret is never logged.
+Три команды, которые стоит прогнать сразу после установки и после любой своей правки:
 
 ```bash
-export BYBIT_API_KEY=...
-export BYBIT_API_SECRET=...
-# optional: BYBIT_CATEGORY=spot|linear
+npm test        # 597 тестов, ~17 секунд
+npm run lint    # молчание = всё хорошо
+npm run build   # компиляция в dist/
 ```
 
-**Sandbox is the default.** Leaving it needs two independent signals — `BYBIT_LIVE=true` *and* `--live` — plus typed confirmation. Either one alone is refused by name.
+Что означают тесты:
 
-### Stopping a bot
+| Набор | Команда | Что проверяет |
+|---|---|---|
+| Все | `npm test` | всё сразу |
+| Паритет | `npx jest test/parity` | 128 тестов: результаты совпадают с эталоном **бит-в-бит** |
+| Инвариант | `npx jest -t "look-ahead"` | стратегия физически не видит будущие бары |
+| Один файл | `npx jest src/detectors/fvg` | по пути или части имени |
+| В режиме слежения | `npm run test:watch` | перезапуск при сохранении файла |
+
+**Про паритет.** В `test/fixtures/golden/` лежит поведение предыдущей реализации, замороженное как данные. Тесты сверяют результат точно, без допусков. Если паритетный тест упал — считайте, что сломали вы, а не тест. Не подгоняйте фикстуру под новое поведение.
+
+Финальная проверка «руками» — прогнать бэктест и увидеть знакомые цифры:
 
 ```bash
-npm run cli -- halt   --journal data/journal/<file>.ndjson --reason "why"
-npm run cli -- resume --journal data/journal/<file>.ndjson
+npm run cli -- backtest:ob4h
 ```
 
-A halt is written to the journal, so it stops the bot at its next tick **and survives a restart** — a loss limit a restart clears is not a loss limit. Halting cancels resting entries but deliberately leaves an open position alone: its stop is already at the venue, and selling at market on the way out realizes a loss the stop might never have taken. Close it yourself if you want out.
+Должно напечатать 150 сделок, win rate 51.3%, profit factor 0.99. Это эталонный прогон.
 
-Automatic halts: `--max-daily-dd 0.03` (daily realized loss) and `--max-losses 4` (consecutive losers).
+## 4. Бэктесты
 
-## Go-live checklist
+### 4.1. Главное правило
 
-Do not skip steps. Each one has caught a real class of problem.
+**Всегда прогоняйте с комиссией.** Без неё картинка приукрашена настолько, что решение принимается по вымыслу:
 
-**Before the strategy is allowed near a venue**
-- [ ] Backtest **with costs**: `--fee 0.001 --slippage 0.0005 --worst-case`. Profit factor above 1 net of costs, or stop here.
-- [ ] Read the trade list, not just the summary. Do entries sit at levels price actually revisits?
+```bash
+# без издержек — «бумажный» результат
+npm run cli -- backtest:ob4h
+#   Total PnL: -0.62%   Profit factor: 0.99
 
-**Paper, on live data — at least two weeks**
-- [ ] `npm run cli -- paper` running continuously.
-- [ ] Compare paper fills against the backtest's. A large gap means the backtest assumes fills the market will not give you.
-- [ ] Kill the process mid-position and restart it. State must come back identical.
+# с комиссией Bybit (0.1% с каждой стороны) — правда
+npm run cli -- backtest:ob4h --fee 0.001
+#   Total PnL: -30.62%  Profit factor: 0.47
 
-**Testnet — at least one week**
-- [ ] `npm run cli -- trade` (sandbox is the default). Get real order rejections, real precision errors, real timeouts.
-- [ ] Verify TP/SL are visible **in the Bybit UI**, not just in the log. They must exist at the venue, not in this process.
-- [ ] Kill the process while an order rests, restart, confirm reconciliation adopts or drops it correctly.
-- [ ] Practice `halt` and confirm the bot stops opening positions.
+# плюс проскальзывание и худший сценарий на баре — стресс
+npm run cli -- backtest:ob4h --fee 0.001 --slippage 0.0005 --worst-case
+#   Total PnL: -35.55%  Profit factor: 0.43
+```
 
-**Only then, real funds**
-- [ ] API key: trading enabled, **withdrawal disabled**, IP allowlist set.
-- [ ] Start with an amount you would shrug off entirely.
-- [ ] `--max-daily-dd` and `--max-losses` set. A bot without a kill switch is not a bot, it is a leak.
-- [ ] Know how to stop it — `halt`, and how to close a position by hand in the UI.
-- [ ] Watch the first day. Read `data/journal/*.log.ndjson` for every exchange call and its response.
+Одна комиссия превратила 18 прибыльных сделок в убыточные. Прогон без `--fee` нужен только для сверки с эталоном.
 
-## What this does not do
+### 4.2. Крипта (основная команда)
 
-Single symbol, single position, REST polling (no WebSocket), no order-book awareness, no partial fills, no funding-rate handling for perpetuals. The HTTP API (`npm run start`, loopback only) has no authentication — it is a local tool.
+```bash
+npm run cli -- backtest:ob4h [флаги]
+```
+
+| Флаг | По умолчанию | Смысл |
+|---|---|---|
+| `--symbol <пара>` | `BTC/USDT` | торговая пара |
+| `--start <дата>` | `2023-01-01` | начало периода |
+| `--end <дата>` | `2024-01-01` | конец периода |
+| `--balance <usd>` | `10000` | стартовый депозит |
+| `--risk <доля>` | `0.01` | риск на сделку (0.01 = 1%) |
+| `--fee <доля>` | `0` | комиссия с каждой стороны |
+| `--slippage <доля>` | `0` | проскальзывание на стопах и экспирации |
+| `--worst-case` | выкл | бар задел и тейк, и стоп → считать стопом |
+| `--max-daily-dd <доля>` | выкл | пауза на день после такого убытка |
+| `--window <баров>` | `500` | сколько баров истории видит стратегия |
+
+**Даты требуют явной зоны.** `2023-06-01` читается как UTC-полночь. `2023-06-01T00:00:00` без `Z` будет отвергнут с объяснением — иначе он молча сдвинул бы период на часовой пояс вашей машины. Несуществующие даты (`2023-02-30`) тоже отвергаются.
+
+Период за пределами кэша скачается с Binance автоматически (нужен интернет), а потом ляжет в кэш.
+
+### 4.3. Форекс через Yahoo Finance
+
+```bash
+npm run cli -- backtest:h1-3m --ticker EURUSD=X --days 58
+```
+
+Yahoo отдаёт максимум 60 дней пятиминуток — отсюда дефолт 58. Нужен интернет.
+
+### 4.4. Данные из MetaTrader 5
+
+```bash
+npm run cli -- backtest:frankfurt --csv data/dax_1m.csv --tz Europe/Berlin --charts
+```
+
+Экспорт из MT5: правый клик по графику → «Сохранить как» → CSV. Разделитель — таб или запятая, определяется сам. `--tz` — часовой пояс сервера брокера (не ваш!). `--charts` дополнительно рисует HTML-разбор каждой сделки.
+
+## 5. Графики
+
+```bash
+npm run cli -- visualize --chart-month 2023-02 --top 3
+```
+
+Кладёт в `reports/`:
+- `chart_2023_02.html` — свечи 4h за месяц со всеми найденными паттернами и сделками;
+- `trade_1_BTC_USDT_p2_5pct.html` — разбор каждой из топ-3 сделок по модулю PnL, два таймфрейма.
+
+Открывайте прямо в браузере. В имени файла зашит PnL: `p2_5pct` = +2.5%, `m1_75pct` = −1.75%.
+
+## 6. Своя стратегия — пошагово
+
+Три шага. После них стратегия работает везде: бэктест, бумага, биржа, REST API.
+
+### Шаг 1. Файл стратегии
+
+`src/strategies/my.strategy.ts`:
+
+```ts
+import { FvgDetector } from '../detectors/fvg.detector';
+import { MarketContext } from '../domain/market-context';
+import { Strategy } from '../domain/ports';
+import { Direction, Signal } from '../domain/signal';
+
+export interface MyOptions {
+  readonly minRr?: number;
+}
+
+export class MyStrategy extends Strategy {
+  readonly name = 'my_strategy';
+  readonly version = '1.0';
+  readonly minRr: number;
+
+  constructor(options: MyOptions = {}) {
+    super();
+    this.minRr = options.minRr ?? 2;
+  }
+
+  checkEntry(context: MarketContext): Signal | null {
+    const candles = context.candles('15m');
+    if (candles.isEmpty) {
+      return null;
+    }
+
+    // Готовые кубики: девять детекторов в src/detectors/
+    const gaps = new FvgDetector({ timeframe: '15m' }).detect(candles);
+    const fresh = gaps.filter((g) => g.meta.direction === 'bullish' && !g.meta.mitigated);
+    if (fresh.length === 0) {
+      return null;
+    }
+
+    const gap = fresh[fresh.length - 1];
+    const entry = gap.high;      // уровень из ПРОШЛЫХ баров
+    const stopLoss = gap.low;
+    const risk = entry - stopLoss;
+
+    return new Signal({
+      symbol: context.symbol,
+      direction: Direction.Long,
+      entry,
+      stopLoss,
+      takeProfit: entry + risk * this.minRr,
+      timeframe: '15m',
+      timestamp: candles.lastTime as number,   // время последнего видимого бара
+      strategyName: this.name,
+      strategyVersion: this.version,
+    });
+  }
+}
+```
+
+**Единственное железное правило:** `entry`, `stopLoss` и `takeProfit` должны быть уровнями из **прошлых** баров (граница гэпа, край блока, уровень сессии). Нельзя брать их из OHLC текущего бара — это заглядывание в будущее, и весь результат станет фикцией. Движок исполняет ордер на том же баре, где пришёл сигнал, ровно потому что предполагает лимитку на заранее известном уровне.
+
+### Шаг 2. Регистрация
+
+В `src/application/strategy-registry.service.ts` добавьте одну запись в `BUILT_IN_STRATEGIES`:
+
+```ts
+{
+  id: 'my_strategy',
+  version: '1.0',
+  description: 'Ретест бычьего FVG на 15m',
+  requiredTimeframes: ['15m'],
+  defaultParams: { minRr: 2 },
+  create: (params) => new MyStrategy(params),
+},
+```
+
+Проверьте: `npm run cli -- strategies`.
+
+### Шаг 3. Запуск
+
+```bash
+npm run cli -- paper --strategy my_strategy --params '{"minRr":3}' --once
+```
+
+`--params` перекрывает только названные поля, остальные берутся из `defaultParams`.
+
+### Что доступно внутри стратегии
+
+Девять детекторов в `src/detectors/`, у всех одинаковый контракт `detect(candles) → Pattern[]`:
+
+| Детектор | Что находит |
+|---|---|
+| `FvgDetector` | Fair Value Gap (имбаланс из трёх свечей) |
+| `OrderBlockDetector` | ордер-блоки на подтверждённых свингах |
+| `LiquidityDetector` | уровни ликвидности BSL/SSL и их снятие |
+| `StructureDetector` | BOS / CHOCH (слом структуры) |
+| `PremiumDiscountDetector` | премиальная и дисконтная зоны диапазона |
+| `SnrDetector` | зоны поддержки и сопротивления |
+| `FractalDetector` | фракталы из трёх свечей |
+| `KillzoneDetector` | киллзоны (фиксированные часы UTC) |
+| `InitialBalanceDetector` | Initial Balance сессии (локальное время, с учётом перехода на летнее) |
+
+Стратегия может смешивать любые детекторы на любых таймфреймах: `context.candles('4h')` и `context.candles('15m')` в одном методе — обычное дело. Типизированные факты детекторы кладут в `pattern.meta` (`direction`, `mitigated`, `side`, `swept` и т.д.) — смотрите комментарий над классом детектора, там перечислены ключи.
+
+Стратегия может хранить состояние между барами (движок отдаёт новый контекст, но тот же объект стратегии) — см. `frankfurt-ib-50.strategy.ts`. Опционально переопределяется `checkExit(context, trade)` — он вызывается в живом режиме.
+
+### Порядок работы над стратегией
+
+```bash
+npx jest src/strategies/my                    # 1. быстрый цикл: свои тесты
+npm run cli -- backtest:ob4h --fee 0.001      # 2. бэктест с издержками — главный критерий
+npm run cli -- visualize                      # 3. посмотреть глазами
+npm run cli -- paper --strategy my_strategy   # 4. на живых данных без денег
+```
+
+## 7. Бумажная торговля (paper)
+
+Стратегия крутится на **настоящих** данных Bybit, сделки симулируются. Ключи не нужны, деньги не участвуют.
+
+```bash
+# один тик и выход — проверить, что всё живо
+npm run cli -- paper --once
+
+# постоянная работа (Ctrl+C для остановки)
+npm run cli -- paper --strategy my_strategy --symbol BTC/USDT
+```
+
+Полезные флаги: `--balance`, `--risk`, `--fee` (по умолчанию **0.001**, то есть реалистично), `--entry-timeout <минут>` (отмена неисполненного входа), `--max-daily-dd`, `--max-losses`, `--journal <путь>`, `--exchange <id>`.
+
+### Чем paper отличается от бэктеста — и почему это важно
+
+В бэктесте лимитка исполняется на том же баре, где пришёл сигнал: история уже показала, что цена коснулась уровня. В paper ордер выставляется **после** закрытия сигнального бара и исполняется, только если цена **вернётся** к уровню на одном из следующих баров. Ровно так будет и на бирже.
+
+Поэтому разница между бэктестом и paper — это и есть измерение того, достижимы ли ваши входы вообще. Если бэктест показывает 150 сделок, а paper за тот же период — 20, значит бэктест считал исполнимым то, чего рынок не даёт.
+
+### Живучесть
+
+Каждое действие пишется в журнал `data/journal/*.ndjson` до возврата из метода. Убейте процесс посреди позиции и запустите снова — баланс, висящий ордер и открытая позиция восстановятся:
+
+```bash
+npm run cli -- paper --once     # поработал
+# Ctrl+C или kill -9
+npm run cli -- paper --once     # "journal: … (state restored)"
+```
+
+## 8. Bybit: тестнет
+
+### 8.1. Получить ключи
+
+1. Зайдите на **testnet.bybit.com** (отдельный сайт от основного, аккаунт тоже отдельный).
+2. Зарегистрируйтесь, в разделе API создайте ключ.
+3. Права: **торговля — да, вывод средств — нет**. Ограничьте по IP, если возможно.
+4. На тестнете есть кран с виртуальными деньгами — пополните счёт.
+
+### 8.2. Переменные окружения
+
+| Переменная | Обязательна | Значение |
+|---|---|---|
+| `BYBIT_API_KEY` | да | ключ API |
+| `BYBIT_API_SECRET` | да | секрет API |
+| `BYBIT_CATEGORY` | нет | `spot` (по умолчанию) или `linear` |
+| `BYBIT_LIVE` | нет | `true` — только для реальных денег, см. п.9 |
+
+```bash
+export BYBIT_API_KEY=ваш_ключ
+export BYBIT_API_SECRET=ваш_секрет
+```
+
+Экспортируйте в текущей сессии терминала, а не в `.bashrc`. Секрет нигде не логируется; в вывод попадает только маскированный префикс ключа.
+
+### 8.3. Запуск
+
+```bash
+npm run cli -- trade --symbol BTC/USDT --max-daily-dd 0.03 --max-losses 4
+```
+
+Первая строка вывода скажет, куда вы подключились:
+
+```
+exchange: bybit spot TESTNET (key abcd…****)
+```
+
+**Тестнет — режим по умолчанию.** Чтобы попасть на реальные деньги, нужны два независимых сигнала (п.9).
+
+### 8.4. Что происходит при старте
+
+1. Сверяются часы с биржей. Расхождение больше 3 секунд — отказ с объяснением (иначе каждый подписанный запрос падал бы с невнятной ошибкой).
+2. Загружаются правила рынка: шаг цены, шаг объёма, минимальный размер ордера.
+3. Проигрывается журнал.
+4. **Сверка с биржей**: если журнал считает ордер висящим, у биржи спрашивается, что с ним стало на самом деле — он мог исполниться, пока процесс был выключен.
+
+Дальше на каждом закрытии свечи: наблюдение за ордерами → проверка выхода → возможный вход.
+
+### 8.5. Что делает бот на бирже
+
+- Вход — **лимитный** ордер по цене из сигнала.
+- К нему **прикреплены** тейк-профит и стоп-лосс: их исполняет Bybit, а не наш процесс. Даже если бот выключен, упал или потерял связь — стоп сработает.
+- У каждого ордера свой `orderLinkId` (наш идентификатор). Повтор запроса после потери связи биржа отклонит, а не откроет вторую позицию.
+- Размер зажат тремя ограничениями: риск, реально доступный баланс с учётом комиссии, минимумы биржи.
+- Неисполненный вход отменяется по `--entry-timeout`.
+
+**Обязательно проверьте:** после первого входа откройте интерфейс Bybit и убедитесь, что TP и SL **видны там**. Они должны существовать на бирже, а не только в логе.
+
+## 9. Реальные деньги
+
+Защита от случайного запуска — **два независимых сигнала**, ни один не работает в одиночку:
+
+```bash
+export BYBIT_LIVE=true
+npm run cli -- trade --live --max-daily-dd 0.02 --max-losses 3
+```
+
+Дополнительно попросят вручную набрать название пары. Пропустить подтверждение — `--yes` (не используйте, пока не автоматизируете осознанно).
+
+Что произойдёт при половинчатой настройке:
+
+```
+BYBIT_LIVE=true, но без --live  →  Refusing to trade real funds without both.
+--live, но без BYBIT_LIVE       →  Refusing to trade real funds without both.
+```
+
+### Чек-лист перед реальными деньгами
+
+Не пропускайте шаги — каждый ловит свой класс проблем.
+
+**Стратегия**
+- [ ] Бэктест **с издержками**: `--fee 0.001 --slippage 0.0005 --worst-case`. Profit factor больше 1 после издержек — или дальше идти незачем.
+- [ ] Прочитан список сделок, а не только итог. Входы стоят на уровнях, к которым цена реально возвращается?
+
+**Бумага, минимум две недели**
+- [ ] `npm run cli -- paper` работает непрерывно.
+- [ ] Сравнили исполнения с бэктестом. Большой разрыв = бэктест считает исполнимым то, чего рынок не даёт.
+- [ ] Убили процесс посреди позиции и перезапустили — состояние вернулось.
+
+**Тестнет, минимум неделя**
+- [ ] `npm run cli -- trade` — реальные отказы биржи, реальные ошибки точности, реальные таймауты.
+- [ ] TP/SL видны **в интерфейсе Bybit**.
+- [ ] Убили процесс с висящим ордером, перезапустили — сверка отработала.
+- [ ] Потренировались останавливать бота командой `halt`.
+
+**Только теперь деньги**
+- [ ] Ключ: торговля включена, **вывод выключен**, IP ограничен.
+- [ ] Сумма, потерю которой вы не заметите.
+- [ ] Заданы `--max-daily-dd` и `--max-losses`. Бот без стопа — не бот, а утечка.
+- [ ] Вы знаете, как его остановить и как закрыть позицию руками.
+- [ ] Первый день — под наблюдением, с чтением `data/journal/*.log.ndjson`.
+
+## 10. Как остановить бота
+
+Три разных способа для трёх разных ситуаций.
+
+**Ctrl+C** — останавливает процесс. Ордера и позиции на бирже **остаются как есть**: стоп продолжает работать, потому что живёт на бирже. Запустите заново — состояние восстановится.
+
+**`halt`** — запрещает открывать новые позиции, **переживает перезапуск**:
+
+```bash
+npm run cli -- halt --journal data/journal/testnet_my_strategy_BTC_USDT.ndjson --reason "разбираюсь"
+npm run cli -- resume --journal <тот же файл>
+```
+
+Команда пишет в журнал, а не сигналит процессу, поэтому работает, даже если бот сейчас не запущен. Вступает в силу на следующем тике. Висящие ордера отменяются, **открытая позиция остаётся** — её стоп уже на бирже, а продажа по рынку зафиксировала бы убыток, которого стоп мог и не взять. Закрывать позицию — ваше решение.
+
+**Автоматически** — `--max-daily-dd 0.03` (дневной убыток) и `--max-losses 4` (убытки подряд). Сработав, kill switch остаётся включённым и после перезапуска: лимит убытка, который сбрасывается рестартом, — не лимит убытка. Снимается только командой `resume`.
+
+## 11. HTTP API
+
+```bash
+npm run start          # слушает 127.0.0.1:3000
+```
+
+| Метод | Путь | Назначение |
+|---|---|---|
+| GET | `/api/health` | статус |
+| GET | `/api/strategies` | список стратегий с параметрами |
+| POST | `/api/backtests` | запустить бэктест → `202 {id}` |
+| GET | `/api/backtests/:id` | статус и отчёт |
+| GET | `/api/backtests/:id/trades` | сделки целиком |
+| GET | `/api/reports` | список сгенерированных отчётов |
+
+```bash
+curl -X POST http://localhost:3000/api/backtests \
+  -H 'Content-Type: application/json' \
+  -d '{"strategy":"OB_4h_FVG_15m",
+       "data":{"source":"binance","symbol":"BTC/USDT","timeframes":["4h","15m"],
+               "start":"2023-01-01T00:00:00Z","end":"2024-01-01T00:00:00Z"},
+       "engine":{"baseTimeframe":"15m","window":500},
+       "account":{"initialBalance":10000,"feeRate":0.001}}'
+```
+
+Прогоны асинхронные: сразу возвращается `id`, статус опрашивается через `GET`.
+
+**API без аутентификации** — поэтому слушает только localhost. Не выставляйте наружу. Переменные `PORT` и `HOST` меняют привязку, но менять `HOST` стоит, только понимая последствия.
+
+## 12. Где что лежит
+
+```
+src/
+├── domain/          контракты: свечи, паттерны, сигналы, сделки, время
+├── detectors/       девять детекторов ICT — кубики для стратегий
+├── strategies/      ваши стратегии
+├── engine/          BacktestEngine (история) и LiveEngine (живой цикл)
+├── execution/       BacktestAdapter (модель исполнения), PaperAdapter (симуляция)
+├── infrastructure/  биржи, кэш, журнал, логи, графики
+├── application/     реестр стратегий, запуск бэктестов
+├── api/             HTTP-контроллеры
+└── cli/             команды
+
+data/cache/           кэш свечей (в git не попадает)
+data/journal/         журналы бумажной и реальной торговли (в git не попадают)
+reports/              сгенерированные HTML-отчёты (в git не попадают)
+test/fixtures/golden/ эталоны для паритетных тестов (в git попадают, это важно)
+```
+
+Подробности архитектуры и инварианты, которые нельзя ломать, — в `CLAUDE.md`.
+
+## 13. Если что-то пошло не так
+
+| Симптом | Причина и что делать |
+|---|---|
+| `Missing exchange credentials` | не заданы `BYBIT_API_KEY` / `BYBIT_API_SECRET` в текущем терминале |
+| `Refusing to trade real funds without both` | заданы не оба сигнала: нужны `BYBIT_LIVE=true` **и** `--live` |
+| `Local clock is … ms from Bybit` | часы машины разошлись с биржей, синхронизируйте системное время |
+| `--start: … has no timezone` | добавьте `Z`: `2023-06-01T00:00:00Z` или просто `2023-06-01` |
+| `… is not a real date` | такой даты не существует (`2023-02-30`, `2023-02-29`) |
+| `below the venue minimum` | размер ордера меньше минимума биржи — увеличьте депозит или риск |
+| `Position size … balance too small` | стоп слишком узкий для такого депозита |
+| `Already engaged on <пара>` | одна позиция на пару; дождитесь закрытия |
+| `Spot trading supports long entries only` | шорт на споте невозможен — нужен `BYBIT_CATEGORY=linear` |
+| Бэктест выдал 0 сделок | период вне кэша и нет интернета; либо условия стратегии не выполнились |
+| Паритетный тест упал после вашей правки | вы изменили поведение движка или детектора — правьте код, а не фикстуру |
+| Бот не открывает позиции | проверьте журнал на событие `halted`; снимите через `resume` |
+| Флаг не сработал | забыли `--` после `npm run cli` |
+
+---
+
+## Важное предупреждение
+
+Встроенная стратегия `OB_4h_FVG_15m` **убыточна с реальными комиссиями** — profit factor 0.47 на годовой истории BTC. Она годится как рабочий пример и для тестнета, но не для денег. Инструмент готов; торговую логику пишете вы.
+
+Бэктест никогда не равен будущему. Даже прибыльный после издержек результат — не обещание.

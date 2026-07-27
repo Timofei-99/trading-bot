@@ -103,6 +103,45 @@ describe('backtests API', () => {
         .send({ ...validBody, account: { riskPerTrade: 2 } })
         .expect(400);
     });
+
+    it('rejects an absurd fee instead of silently accepting it', async () => {
+      await request(server())
+        .post('/api/backtests')
+        .send({ ...validBody, account: { feeRate: 0.9 } })
+        .expect(400);
+    });
+  });
+
+  it('applies the trading costs it was given', async () => {
+    // `whitelist: true` deletes undeclared properties, so a cost field missing
+    // from the DTO would not fail here — it would quietly return a GROSS
+    // result to a caller who asked for a net one. Assert the numbers differ.
+    const post = async (account: Record<string, unknown>): Promise<Record<string, number>> => {
+      const created = await request(server())
+        .post('/api/backtests')
+        .send({ ...validBody, account })
+        .expect(202);
+
+      for (let attempt = 0; attempt < 100; attempt++) {
+        const response = await request(server()).get(`/api/backtests/${created.body.id}`);
+        if (response.body.status === 'completed') {
+          return response.body.report;
+        }
+        if (response.body.status === 'failed') {
+          throw new Error(`run failed: ${response.body.error}`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      throw new Error('run did not finish');
+    };
+
+    const gross = await post({ initialBalance: 10_000 });
+    const net = await post({ initialBalance: 10_000, feeRate: 0.001 });
+
+    expect(net.totalTrades).toBe(gross.totalTrades);
+    expect(net.totalPnlPct).toBeLessThan(gross.totalPnlPct);
+    // Two fees per round trip, charged against the entry notional.
+    expect(gross.totalPnlPct - net.totalPnlPct).toBeCloseTo(0.001 * 2 * gross.totalTrades, 3);
   });
 
   it('404s for an unknown run', async () => {

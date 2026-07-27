@@ -1,6 +1,7 @@
 import { Type } from 'class-transformer';
 import {
   IsArray,
+  IsBoolean,
   IsIn,
   IsISO8601,
   IsNumber,
@@ -68,6 +69,34 @@ export class BacktestAccountDto {
   @Min(0.0001)
   @Max(1)
   riskPerTrade?: number;
+
+  /**
+   * Trading costs. These MUST be declared here even though the runner would
+   * accept them anyway: `whitelist: true` deletes undeclared properties, so an
+   * omission does not fail the request — it silently returns a gross result to
+   * a caller who asked for a net one.
+   */
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(0.5)
+  feeRate?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(0.5)
+  slippage?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  worstCase?: boolean;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0.0001)
+  @Max(1)
+  maxDailyDrawdown?: number;
 }
 
 /**
