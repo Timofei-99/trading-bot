@@ -1,0 +1,58 @@
+{
+  "name": "trading-bot",
+  "version": "0.1.0",
+  "description": "ICT / Smart Money Concepts strategy-construction toolkit: composable pattern detectors, multi-timeframe strategies and a bar-by-bar backtest engine.",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "build": "nest build",
+    "start": "nest start",
+    "start:dev": "nest start --watch",
+    "start:prod": "node dist/main",
+    "cli": "ts-node src/cli.ts",
+    "cli:prod": "node dist/cli",
+    "seed-cache": "ts-node scripts/seed-cache.ts",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:cov": "jest --coverage",
+    "lint": "eslint src test --no-error-on-unmatched-pattern",
+    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\""
+  },
+  "dependencies": {
+    "@nestjs/common": "^11.1.28",
+    "@nestjs/core": "^11.1.28",
+    "@nestjs/platform-express": "^11.1.28",
+    "ccxt": "^4.5.68",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.14.2",
+    "luxon": "^3.7.2",
+    "nest-commander": "^3.20.1",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "yahoo-finance2": "^4.0.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.0",
+    "@nestjs/cli": "^11.0.24",
+    "@nestjs/schematics": "^11.0.9",
+    "@nestjs/testing": "^11.1.28",
+    "@swc/core": "^1.15.0",
+    "@swc/jest": "^0.2.39",
+    "@types/jest": "^30.0.0",
+    "@types/luxon": "^3.7.1",
+    "@types/node": "^22.19.0",
+    "@types/supertest": "^6.0.3",
+    "eslint": "^9.39.0",
+    "eslint-config-prettier": "^10.1.8",
+    "jest": "^30.4.2",
+    "nest-commander-testing": "^3.5.1",
+    "prettier": "^3.6.2",
+    "supertest": "^7.1.4",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

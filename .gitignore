@@ -1,3 +1,10 @@
+# Node / TypeScript
+node_modules/
+coverage/
+*.tsbuildinfo
+.swc/
+npm-debug.log*
+
 # Python
 __pycache__/
 *.py[cod]
