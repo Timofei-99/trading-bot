@@ -103,12 +103,13 @@ export function renderTrade(options: RenderTradeOptions): PlotlyFigure {
   delete layout.xaxis;
   delete layout.yaxis;
 
+  const xRange = [PlotlyFigureBuilder.time(x0), PlotlyFigureBuilder.time(x1)];
+
   builder.setLayout({
     ...layout,
     title: tradeTitle(trade),
     grid: { rows: 2, columns: 1, pattern: 'independent' },
-    // Top panel takes 40% of the height, bottom 60%, as the subplot did.
-    xaxis: { gridcolor: style.GRID, showgrid: true, domain: [0, 1], anchor: 'y' },
+    xaxis: { gridcolor: style.GRID, showgrid: true, domain: [0, 1], anchor: 'y', range: xRange },
     yaxis: { gridcolor: style.GRID, showgrid: true, domain: [0.62, 1] },
     xaxis2: {
       gridcolor: style.GRID,
@@ -116,7 +117,7 @@ export function renderTrade(options: RenderTradeOptions): PlotlyFigure {
       domain: [0, 1],
       anchor: 'y2',
       rangeslider: { visible: false },
-      matches: 'x',
+      range: xRange,
     },
     yaxis2: { gridcolor: style.GRID, showgrid: true, domain: [0, 0.58] },
     annotations: [

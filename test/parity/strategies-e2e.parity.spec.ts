@@ -3,11 +3,7 @@ import { Strategy } from '../../src/domain/ports';
 import { Trade } from '../../src/domain/trade';
 import { BacktestEngine } from '../../src/engine/backtest.engine';
 import { BacktestAdapter, BacktestReport } from '../../src/execution/backtest.adapter';
-import {
-  FrankfurtIb50Strategy,
-  H1m3mClassicStrategy,
-  Ob4hFvg15mStrategy,
-} from '../../src/strategies';
+import { H1m3mClassicStrategy, Ob4hFvg15mStrategy } from '../../src/strategies';
 import {
   GoldenNumber,
   GoldenReport,
@@ -54,20 +50,6 @@ const RUNS: RunSpec[] = [
         obLookback: params.ob_lookback as number,
         liquiditySweepLookback: params.liquidity_sweep_lookback as number,
         minRr: params.min_rr as number,
-      }),
-  },
-  {
-    run: 'frankfurt_ib50_synth',
-    timeframes: ['1m'],
-    datasets: ['frankfurt_1m'],
-    build: (params) =>
-      new FrankfurtIb50Strategy({
-        sessionStart: params.session_start as string,
-        sessionTz: params.session_tz as string,
-        ibDurationMinutes: params.ib_duration_minutes as number,
-        sessionEnd: params.session_end as string,
-        swingLength: params.swing_length as number,
-        timeframe: params.timeframe as string,
       }),
   },
   {

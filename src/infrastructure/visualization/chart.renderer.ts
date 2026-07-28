@@ -110,7 +110,7 @@ export function drawPattern(
       drawSnr(builder, pattern, rightEdge, refs);
       return true;
     case PatternType.InitialBalance:
-      drawInitialBalance(builder, pattern, refs);
+      drawInitialBalance(builder, pattern, rightEdge, refs);
       return true;
     default:
       return false;
@@ -304,13 +304,15 @@ function drawSnr(
 function drawInitialBalance(
   builder: PlotlyFigureBuilder,
   pattern: Pattern,
+  rightEdge: number,
   refs: AxisRefs,
 ): void {
-  const x1 = pattern.endTime ?? pattern.startTime;
+  const ibEnd = pattern.endTime ?? pattern.startTime;
 
+  // Shaded rectangle only over the IB formation window.
   builder.addRect({
     x0: pattern.startTime,
-    x1,
+    x1: ibEnd,
     y0: pattern.low,
     y1: pattern.high,
     fillcolor: style.IB_FILL,
@@ -318,16 +320,15 @@ function drawInitialBalance(
     ...refs,
   });
 
+  // High, low and mid lines extend to the right edge so breakout levels stay visible.
   const mid = typeof pattern.meta.mid === 'number' ? pattern.meta.mid : pattern.mid;
-  builder.addLine({
-    x0: pattern.startTime,
-    x1,
-    y0: mid,
-    y1: mid,
-    color: style.IB_MID,
-    dash: 'dot',
-    ...refs,
-  });
+  for (const [y, color, dash] of [
+    [pattern.high, style.IB_BORDER, 'solid'],
+    [pattern.low, style.IB_BORDER, 'solid'],
+    [mid, style.IB_MID, 'dot'],
+  ] as [number, string, string][]) {
+    builder.addLine({ x0: ibEnd, x1: rightEdge, y0: y, y1: y, color, dash, ...refs });
+  }
 }
 
 function drawTradeMarker(
@@ -340,25 +341,48 @@ function drawTradeMarker(
     return;
   }
   const isLong = trade.signal.direction === Direction.Long;
+  const lineEnd = trade.exitTime !== null ? Math.min(trade.exitTime, x1) : x1;
 
+  // SL and TP dashed lines from entry to exit (or chart edge).
+  for (const [y, color, label] of [
+    [trade.signal.stopLoss, style.TRADE_SL, `SL ${trade.signal.stopLoss.toFixed(1)}`],
+    [trade.signal.takeProfit, style.TRADE_TP, `TP ${trade.signal.takeProfit.toFixed(1)}`],
+  ] as [number, string, string][]) {
+    builder.addLine({ x0: trade.entryTime, x1: lineEnd, y0: y, y1: y, color, dash: 'dot' });
+    builder.addAnnotation({
+      x: PlotlyFigureBuilder.time(lineEnd),
+      y,
+      text: label,
+      xanchor: 'left',
+      font: { color, size: 10 },
+    });
+  }
+
+  // Entry arrow.
   builder.addAnnotation({
     x: PlotlyFigureBuilder.time(trade.entryTime),
     y: trade.entryPrice,
     ax: 0,
-    ay: isLong ? 25 : -25,
+    ay: isLong ? 30 : -30,
     arrowhead: 2,
     arrowcolor: style.TRADE_ENTRY,
     arrowwidth: 1.5,
     showarrow: true,
+    text: `entry ${trade.entryPrice.toFixed(1)}`,
+    font: { color: style.TRADE_ENTRY, size: 10 },
   });
 
+  // Exit marker.
   if (trade.exitTime !== null && trade.exitPrice !== null) {
     const color = trade.isWinner ? style.TRADE_EXIT_WIN : style.TRADE_EXIT_LOSS;
     builder.addScatter({
       x: [PlotlyFigureBuilder.time(trade.exitTime)],
       y: [trade.exitPrice],
-      mode: 'markers',
-      marker: { color, size: 8, symbol: 'x' },
+      mode: 'markers+text',
+      marker: { color, size: 10, symbol: 'x' },
+      text: [`${trade.exitReason} ${formatSigned((trade.pnlPct ?? 0) * 100, 2)}%`],
+      textposition: 'top center',
+      textfont: { color, size: 10 },
       hovertext: `exit: ${trade.exitReason} (${formatSigned((trade.pnlPct ?? 0) * 100, 2)}%)`,
     });
   }
