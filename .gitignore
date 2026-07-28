@@ -89,5 +89,7 @@ secrets.yaml
 # Claude Code local settings
 .claude/
 
-# Generated reports
-reports/
+# Generated reports — anchored to the repo root on purpose. Unanchored, this
+# also swallowed test/fixtures/golden/reports/, which silently kept the golden
+# backtest reports out of the repo and left the parity gate unable to run.
+/reports/

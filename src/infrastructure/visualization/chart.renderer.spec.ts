@@ -181,6 +181,34 @@ describe('renderChart', () => {
       expect(shape.fillcolor).toBe('rgba(59, 130, 246, 0.10)');
     });
 
+    it('shades the initial balance window and extends its levels to the right edge', () => {
+      const figure = renderChart({
+        context: contextWith(),
+        timeframe: '4h',
+        patterns: [pattern(PatternType.InitialBalance)],
+      });
+
+      const shapes = figure.layout.shapes as Record<string, unknown>[];
+
+      // The shaded box covers only the formation window …
+      const box = shapes.find((shape) => shape.type === 'rect');
+      expect(box).toMatchObject({
+        x0: new Date(bar(2)).toISOString(),
+        x1: new Date(bar(6)).toISOString(),
+        y0: 105,
+        y1: 110,
+      });
+
+      // … while high, low and mid run from the IB close to the last bar, which
+      // is what makes a later breakout of those levels readable on the chart.
+      const levels = shapes.filter((shape) => shape.type === 'line');
+      expect(levels.map((shape) => shape.y0)).toEqual([110, 105, 107.5]);
+      for (const level of levels) {
+        expect(level.x0).toBe(new Date(bar(6)).toISOString());
+        expect(level.x1).toBe(new Date(bar(19)).toISOString());
+      }
+    });
+
     it('skips patterns outside the visible window', () => {
       const outside = new Pattern({
         type: PatternType.Fvg,
@@ -208,12 +236,44 @@ describe('renderChart', () => {
     });
 
     const annotations = figure.layout.annotations as Record<string, unknown>[];
-    expect(annotations).toHaveLength(1);
-    expect(annotations[0].showarrow).toBe(true);
+    const entry = annotations.find((annotation) => annotation.showarrow === true);
+    expect(entry).toMatchObject({
+      x: new Date(bar(5)).toISOString(),
+      y: 105,
+      text: 'entry 105.0',
+    });
 
     const exitTrace = figure.data[1];
-    expect(exitTrace.mode).toBe('markers');
+    expect(exitTrace.mode).toBe('markers+text');
+    expect(exitTrace.text).toEqual(['tp +14.29%']);
     expect(exitTrace.hovertext).toBe('exit: tp (+14.29%)');
+  });
+
+  it('draws the stop and target of a visible trade, labelled at the exit', () => {
+    const figure = renderChart({
+      context: contextWith(),
+      timeframe: '15m',
+      trades: [makeTrade()],
+    });
+
+    // Both levels run from the entry bar to the exit bar, not to the chart edge:
+    // a closed trade's stop stops mattering once it is closed.
+    const levels = (figure.layout.shapes as Record<string, unknown>[]).filter(
+      (shape) => shape.type === 'line' && (shape.line as Record<string, unknown>).dash === 'dot',
+    );
+    expect(levels.map((shape) => shape.y0)).toEqual([100, 120]);
+    for (const level of levels) {
+      expect(level.x0).toBe(new Date(bar(5)).toISOString());
+      expect(level.x1).toBe(new Date(bar(9)).toISOString());
+    }
+
+    const labels = (figure.layout.annotations as Record<string, unknown>[]).filter(
+      (annotation) => annotation.showarrow !== true,
+    );
+    expect(labels.map((annotation) => annotation.text)).toEqual(['SL 100.0', 'TP 120.0']);
+    for (const label of labels) {
+      expect(label.x).toBe(new Date(bar(9)).toISOString());
+    }
   });
 });
 

@@ -15,6 +15,12 @@
     "eurusd": "synthetic, np.random.RandomState(42)",
     "mt5": "synthetic CSV, hand-written DST edge cases"
   },
+  "regeneratedBy": {
+    "reports/*.json": "tools/export-golden/export_reports.py"
+  },
+  "retired": {
+    "reports/ob4h_btc_2023.json": "Listed by the original exporter but never committed, and no trades/ob4h_btc_2023.json exists to derive it from, so it is not recoverable. No test referenced it. Retired rather than deleted silently so the loss stays on the record."
+  },
   "files": [
     "candles/btc_15m.json",
     "candles/btc_15m_head.json",
@@ -63,7 +69,6 @@
     "mt5/fdax_dst_sample.csv",
     "reports/frankfurt_ib50_synth.json",
     "reports/h1_3m_classic_synth.json",
-    "reports/ob4h_btc_2023.json",
     "reports/ob4h_fvg15m_btc_2023.json",
     "trades/frankfurt_ib50_synth.json",
     "trades/h1_3m_classic_synth.json",
