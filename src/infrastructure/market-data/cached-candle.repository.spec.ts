@@ -101,17 +101,13 @@ describe('CachedCandleRepository', () => {
 
   it('fetches both ends when the cache sits in the middle', async () => {
     store.write({ source: 'binance', symbol: 'BTC/USDT', timeframe: '1h' }, bars(4, 6));
-    const upstream = new FakeUpstream((r) =>
-      r.startMs < at(4) ? bars(0, 3) : bars(7, 10),
-    );
+    const upstream = new FakeUpstream((r) => (r.startMs < at(4) ? bars(0, 3) : bars(7, 10)));
 
     const series = await repo(upstream).getCandles(request(0, 10));
 
     expect(upstream.requests).toHaveLength(2);
     expect(series.length).toBe(11);
-    expect(Array.from(series.time)).toEqual(
-      Array.from({ length: 11 }, (_, h) => at(h)),
-    );
+    expect(Array.from(series.time)).toEqual(Array.from({ length: 11 }, (_, h) => at(h)));
   });
 
   it('lets a re-fetched bar replace the cached one', async () => {

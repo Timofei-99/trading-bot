@@ -20,9 +20,9 @@
 import { createWriteStream, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-const DEFAULT_INSTRUMENT = 'DE30_EUR';  // OANDA's name for GER40/DAX — try DE40_EUR if this 404s
+const DEFAULT_INSTRUMENT = 'DE30_EUR'; // OANDA's name for GER40/DAX — try DE40_EUR if this 404s
 const GRANULARITY = 'M1';
-const MAX_CANDLES_PER_REQUEST = 5000;   // OANDA hard limit
+const MAX_CANDLES_PER_REQUEST = 5000; // OANDA hard limit
 const REQUEST_DELAY_MS = 250;
 const OUTPUT_PATH = join('data', 'dax_1m.csv');
 
@@ -61,21 +61,23 @@ function parseArgs(): CliArgs {
     process.exit(1);
   }
 
-  const to = toStr ? new Date(toStr + 'T00:00:00Z') : (() => {
-    const d = new Date();
-    d.setUTCHours(0, 0, 0, 0);
-    return d;
-  })();
+  const to = toStr
+    ? new Date(toStr + 'T00:00:00Z')
+    : (() => {
+        const d = new Date();
+        d.setUTCHours(0, 0, 0, 0);
+        return d;
+      })();
 
-  const from = fromStr ? new Date(fromStr + 'T00:00:00Z') : (() => {
-    const d = new Date(to);
-    d.setUTCFullYear(d.getUTCFullYear() - 2);
-    return d;
-  })();
+  const from = fromStr
+    ? new Date(fromStr + 'T00:00:00Z')
+    : (() => {
+        const d = new Date(to);
+        d.setUTCFullYear(d.getUTCFullYear() - 2);
+        return d;
+      })();
 
-  const baseUrl = live
-    ? 'https://api-fxtrade.oanda.com'
-    : 'https://api-fxpractice.oanda.com';
+  const baseUrl = live ? 'https://api-fxtrade.oanda.com' : 'https://api-fxpractice.oanda.com';
 
   return { token, instrument, from, to, baseUrl };
 }
@@ -139,7 +141,13 @@ async function main(): Promise<void> {
   console.log(`Output : ${OUTPUT_PATH}\n`);
 
   // Probe instrument before starting full download
-  const probe = await fetchWindow(token, baseUrl, instrument, from, new Date(from.getTime() + 3 * 3_600_000));
+  const probe = await fetchWindow(
+    token,
+    baseUrl,
+    instrument,
+    from,
+    new Date(from.getTime() + 3 * 3_600_000),
+  );
   if (probe.length === 0) {
     console.error(`No data returned for instrument "${instrument}".`);
     console.error(`Check the name — it might be DE40_EUR or GER40_EUR in your OANDA account.`);

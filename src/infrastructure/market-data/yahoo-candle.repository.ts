@@ -11,19 +11,7 @@ import { CandleRequest, MarketDataPort } from '../../domain/ports';
  */
 /** The interval strings Yahoo's chart endpoint accepts. */
 type YahooInterval =
-  | '1m'
-  | '2m'
-  | '5m'
-  | '15m'
-  | '30m'
-  | '60m'
-  | '90m'
-  | '1h'
-  | '1d'
-  | '5d'
-  | '1wk'
-  | '1mo'
-  | '3mo';
+  '1m' | '2m' | '5m' | '15m' | '30m' | '60m' | '90m' | '1h' | '1d' | '5d' | '1wk' | '1mo' | '3mo';
 
 const INTERVALS: Readonly<Record<string, { interval: YahooInterval; maxDays: number }>> = {
   '1m': { interval: '1m', maxDays: 7 },

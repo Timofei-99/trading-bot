@@ -159,7 +159,10 @@ export class H1m3mClassicStrategy extends Strategy {
       this.lastHtfBar = htfLastTime;
       const htfHour = utcHour(htfLastTime);
       // The 1h bar must have opened inside the widened detection window.
-      if (htfHour >= H1m3mClassicStrategy.ENTRY_START_UTC - 1 && htfHour < H1m3mClassicStrategy.ENTRY_END_UTC) {
+      if (
+        htfHour >= H1m3mClassicStrategy.ENTRY_START_UTC - 1 &&
+        htfHour < H1m3mClassicStrategy.ENTRY_END_UTC
+      ) {
         const sweep = this.detectFractalSweep(htf, ltf, currentTime);
         if (sweep !== null) {
           this.sweep = sweep;
@@ -435,8 +438,7 @@ export class H1m3mClassicStrategy extends Strategy {
 
       if (this.previousDayHigh !== null && this.previousDayHigh > entry) {
         const reward = this.previousDayHigh - entry;
-        takeProfit =
-          reward / risk >= this.minRr ? this.previousDayHigh : entry + risk * this.minRr;
+        takeProfit = reward / risk >= this.minRr ? this.previousDayHigh : entry + risk * this.minRr;
       } else {
         takeProfit = entry + risk * this.minRr;
       }

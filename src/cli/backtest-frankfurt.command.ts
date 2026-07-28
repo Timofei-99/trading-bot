@@ -43,7 +43,9 @@ export class BacktestFrankfurtCommand extends CommandRunner {
     if (source === 'yahoo') {
       const endMs = Date.now();
       const startMs = endMs - YAHOO_LOOKBACK_DAYS * DAY_MS;
-      console.log(`Fetching ${YAHOO_SYMBOL} 1m from Yahoo Finance (last ${YAHOO_LOOKBACK_DAYS} days) …`);
+      console.log(
+        `Fetching ${YAHOO_SYMBOL} 1m from Yahoo Finance (last ${YAHOO_LOOKBACK_DAYS} days) …`,
+      );
       dataRequest = {
         source: 'yahoo',
         symbol: YAHOO_SYMBOL,
@@ -165,7 +167,10 @@ export class BacktestFrankfurtCommand extends CommandRunner {
     );
   }
 
-  @Option({ flags: '--source <source>', description: 'Data source: mt5 (default) or yahoo (last 7 days)' })
+  @Option({
+    flags: '--source <source>',
+    description: 'Data source: mt5 (default) or yahoo (last 7 days)',
+  })
   parseSource(value: string): 'mt5' | 'yahoo' {
     if (value !== 'mt5' && value !== 'yahoo') throw new Error('--source must be mt5 or yahoo');
     return value;

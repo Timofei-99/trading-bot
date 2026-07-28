@@ -46,12 +46,7 @@ const IB_CLOSES = repeat(100, 60);
 describe('FrankfurtIb50Strategy v2', () => {
   describe('timing gates', () => {
     it('does not enter while the IB window is still open', () => {
-      const series = candles(
-        IB_HIGHS.slice(0, 30),
-        IB_LOWS.slice(0, 30),
-        null,
-        IB_START_MS,
-      );
+      const series = candles(IB_HIGHS.slice(0, 30), IB_LOWS.slice(0, 30), null, IB_START_MS);
       expect(new FrankfurtIb50Strategy().checkEntry(contextOf(series))).toBeNull();
     });
 
@@ -80,7 +75,7 @@ describe('FrankfurtIb50Strategy v2', () => {
       expect(signal).not.toBeNull();
       expect(signal?.direction).toBe(Direction.Long);
       expect(signal?.entry).toBeCloseTo(106, 12);
-      expect(signal?.stopLoss).toBeCloseTo(95, 12);  // IB low
+      expect(signal?.stopLoss).toBeCloseTo(95, 12); // IB low
       expect(signal?.takeProfit).toBeCloseTo(117, 12); // 106 + (106 − 95) = 117, 1:1 RR
       expect(signal?.meta.ib_high).toBeCloseTo(105, 12);
       expect(signal?.meta.ib_low).toBeCloseTo(95, 12);
@@ -146,9 +141,9 @@ describe('FrankfurtIb50Strategy v2', () => {
 
   describe('construction', () => {
     it('rejects a config where ibEnd is before ibStart', () => {
-      expect(
-        () => new FrankfurtIb50Strategy({ ibStart: '10:00', ibEnd: '09:00' }),
-      ).toThrow(/ibStart < ibEnd <= sessionEnd/);
+      expect(() => new FrankfurtIb50Strategy({ ibStart: '10:00', ibEnd: '09:00' })).toThrow(
+        /ibStart < ibEnd <= sessionEnd/,
+      );
     });
 
     it('rejects a config where sessionEnd is before ibEnd', () => {

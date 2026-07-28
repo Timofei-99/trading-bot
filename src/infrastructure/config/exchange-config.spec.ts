@@ -12,16 +12,14 @@ describe('loadExchangeCredentials', () => {
   });
 
   it('names every missing variable at once', () => {
-    expect(() => loadExchangeCredentials({ env: {} })).toThrow(
-      /BYBIT_API_KEY, BYBIT_API_SECRET/,
-    );
+    expect(() => loadExchangeCredentials({ env: {} })).toThrow(/BYBIT_API_KEY, BYBIT_API_SECRET/);
     expect(() => loadExchangeCredentials({ env: {} })).toThrow(/WITHDRAWAL DISABLED/);
   });
 
   it('treats a blank variable as missing', () => {
-    expect(() =>
-      loadExchangeCredentials({ env: { ...KEYS, BYBIT_API_KEY: '   ' } }),
-    ).toThrow(/BYBIT_API_KEY/);
+    expect(() => loadExchangeCredentials({ env: { ...KEYS, BYBIT_API_KEY: '   ' } })).toThrow(
+      /BYBIT_API_KEY/,
+    );
   });
 
   describe('going live takes two independent signals', () => {

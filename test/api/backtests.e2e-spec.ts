@@ -176,9 +176,7 @@ describe('backtests API', () => {
     });
 
     it('returns the trades with their full signals', async () => {
-      const response = await request(server())
-        .get(`/api/backtests/${runId}/trades`)
-        .expect(200);
+      const response = await request(server()).get(`/api/backtests/${runId}/trades`).expect(200);
 
       expect(response.body).toHaveLength(9);
       expect(response.body[0]).toMatchObject({

@@ -65,12 +65,10 @@ export class FrankfurtIb50Strategy extends Strategy {
     this.ibEndTime = parseHhMm(this.ibEnd);
     this.endTime = parseHhMm(this.sessionEnd);
 
-    if (
-      !(
-        compareHourMinute(this.ibStartTime, this.ibEndTime) < 0 &&
-        compareHourMinute(this.ibEndTime, this.endTime) <= 0
-      )
-    ) {
+    if (!(
+      compareHourMinute(this.ibStartTime, this.ibEndTime) < 0 &&
+      compareHourMinute(this.ibEndTime, this.endTime) <= 0
+    )) {
       throw new Error('Require ibStart < ibEnd <= sessionEnd (same day)');
     }
 
@@ -132,8 +130,7 @@ export class FrankfurtIb50Strategy extends Strategy {
     }
 
     const risk = Math.abs(currentClose - stopLoss);
-    const takeProfit =
-      direction === Direction.Long ? currentClose + risk : currentClose - risk;
+    const takeProfit = direction === Direction.Long ? currentClose + risk : currentClose - risk;
 
     const expiry = localWallTimeToUtcMs(table, sessionDate, this.endTime, {
       onNonexistent: 'shiftForward',

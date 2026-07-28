@@ -74,10 +74,7 @@ export class VisualizeCommand extends CommandRunner {
     const month = options.chartMonth ?? '2023-02';
     const chartRange = parseMonth(month, '--chart-month');
 
-    const chartPath = join(
-      this.reports.ensureDir(),
-      `chart_${month.replace('-', '_')}.html`,
-    );
+    const chartPath = join(this.reports.ensureDir(), `chart_${month.replace('-', '_')}.html`);
     renderChart({
       context: outcome.context,
       timeframe: '4h',

@@ -15,9 +15,9 @@ describe('StructureDetector', () => {
     it('reports nothing while price oscillates inside the swings', () => {
       // Closes are the midpoints, so they stay between 6 and 19 — never
       // beyond the swing high at 20 or the swing low at 5.
-      expect(
-        detect([10, 15, 20, 12, 9, 12, 15, 12, 10], [8, 12, 18, 9, 5, 9, 12, 9, 7]),
-      ).toEqual([]);
+      expect(detect([10, 15, 20, 12, 9, 12, 15, 12, 10], [8, 12, 18, 9, 5, 9, 12, 9, 7])).toEqual(
+        [],
+      );
     });
   });
 

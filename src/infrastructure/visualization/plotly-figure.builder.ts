@@ -161,9 +161,8 @@ export class PlotlyFigureBuilder {
       const shape = this.shapes[i];
       shape.xref = xref;
       // Vertical bands already anchor to the panel's full height.
-      shape.yref = typeof shape.yref === 'string' && shape.yref.endsWith('domain')
-        ? `${yref} domain`
-        : yref;
+      shape.yref =
+        typeof shape.yref === 'string' && shape.yref.endsWith('domain') ? `${yref} domain` : yref;
     }
     for (let i = annotationMark; i < this.annotations.length; i++) {
       this.annotations[i].xref = xref;

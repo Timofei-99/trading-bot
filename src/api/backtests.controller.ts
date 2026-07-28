@@ -158,9 +158,7 @@ function serializeTrade(trade: Trade): Record<string, unknown> {
       triggeredBy: trade.signal.triggeredBy,
       meta: trade.signal.meta,
       expiryTime:
-        trade.signal.expiryTime === null
-          ? null
-          : new Date(trade.signal.expiryTime).toISOString(),
+        trade.signal.expiryTime === null ? null : new Date(trade.signal.expiryTime).toISOString(),
     },
   };
 }

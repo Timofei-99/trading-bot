@@ -1,4 +1,11 @@
-import { BadRequestException, Controller, Get, Header, NotFoundException, Param } from '@nestjs/common';
+import {
+  BadRequestException,
+  Controller,
+  Get,
+  Header,
+  NotFoundException,
+  Param,
+} from '@nestjs/common';
 import { existsSync } from 'node:fs';
 
 import { ReportFile, ReportService } from '../application/report.service';

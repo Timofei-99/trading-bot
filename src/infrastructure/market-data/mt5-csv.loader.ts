@@ -81,7 +81,9 @@ export function parseMt5Csv(text: string, options: Mt5LoadOptions = {}): Mt5Load
   }
 
   const separator = options.separator ?? (lines[0].includes('\t') ? '\t' : ',');
-  const header = lines[0].split(separator).map((name) => name.trim().replace(/^<|>$/g, '').toLowerCase());
+  const header = lines[0]
+    .split(separator)
+    .map((name) => name.trim().replace(/^<|>$/g, '').toLowerCase());
 
   const column = (name: string): number => header.indexOf(name);
   if (column('date') < 0 || column('time') < 0) {
@@ -89,9 +91,7 @@ export function parseMt5Csv(text: string, options: Mt5LoadOptions = {}): Mt5Load
     // out through the HTTP API, and the file being parsed is named by the
     // caller — echoing its first line back would turn a parse failure into a
     // file-disclosure primitive.
-    throw new Error(
-      `Missing DATE/TIME columns in the MT5 export (found ${header.length} columns)`,
-    );
+    throw new Error(`Missing DATE/TIME columns in the MT5 export (found ${header.length} columns)`);
   }
   for (const name of REQUIRED) {
     if (column(name) < 0) {
@@ -101,7 +101,11 @@ export function parseMt5Csv(text: string, options: Mt5LoadOptions = {}): Mt5Load
 
   // tickvol wins over vol, matching the column precedence of the original.
   const volumeColumn =
-    column('volume') >= 0 ? column('volume') : column('tickvol') >= 0 ? column('tickvol') : column('vol');
+    column('volume') >= 0
+      ? column('volume')
+      : column('tickvol') >= 0
+        ? column('tickvol')
+        : column('vol');
 
   const parsed: { timestamp: number | null; row: Mt5Row }[] = [];
   let ambiguousRows = 0;

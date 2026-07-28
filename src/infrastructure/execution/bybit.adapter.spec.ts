@@ -19,7 +19,12 @@ function candle(i: number, high: number, low: number, close?: number): Candle {
   return { time: bar(i), open: mid, high, low, close: mid, volume: 1 };
 }
 
-function makeSignal(entry = 100, stopLoss = 95, takeProfit = 110, expiryTime: number | null = null): Signal {
+function makeSignal(
+  entry = 100,
+  stopLoss = 95,
+  takeProfit = 110,
+  expiryTime: number | null = null,
+): Signal {
   return new Signal({
     symbol: SYMBOL,
     direction: Direction.Long,

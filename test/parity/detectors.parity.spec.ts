@@ -12,7 +12,12 @@ import {
 import { KillzoneWindow } from '../../src/detectors/killzone.detector';
 import { Pattern } from '../../src/domain/pattern';
 import { Detector } from '../../src/domain/ports';
-import { GoldenPattern, GoldenPatternFile, loadGolden, loadGoldenCandles } from '../fixtures/helpers';
+import {
+  GoldenPattern,
+  GoldenPatternFile,
+  loadGolden,
+  loadGoldenCandles,
+} from '../fixtures/helpers';
 
 /**
  * Every detector, replayed over the same bars the Python implementation saw,
@@ -42,7 +47,10 @@ const str = (params: Params, key: string): string | undefined =>
 function buildDetector(className: string, params: Params): Detector {
   switch (className) {
     case 'FVGDetector':
-      return new FvgDetector({ timeframe: str(params, 'timeframe'), minGap: num(params, 'min_gap') });
+      return new FvgDetector({
+        timeframe: str(params, 'timeframe'),
+        minGap: num(params, 'min_gap'),
+      });
 
     case 'OrderBlockDetector':
       return new OrderBlockDetector({

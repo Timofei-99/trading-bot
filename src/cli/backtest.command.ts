@@ -204,7 +204,10 @@ export class BacktestCommand extends CommandRunner {
       .filter((item) => item !== '');
   }
 
-  @Option({ flags: '--base <tf>', description: 'Timeframe the loop iterates (default: the finest)' })
+  @Option({
+    flags: '--base <tf>',
+    description: 'Timeframe the loop iterates (default: the finest)',
+  })
   parseBase(value: string): string {
     return value;
   }

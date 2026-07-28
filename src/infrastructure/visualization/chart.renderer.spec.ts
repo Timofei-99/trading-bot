@@ -87,7 +87,9 @@ describe('renderChart', () => {
       endMs: bar(6),
     });
 
-    expect(figure.data[0].x).toEqual([bar(3), bar(4), bar(5), bar(6)].map((t) => new Date(t).toISOString()));
+    expect(figure.data[0].x).toEqual(
+      [bar(3), bar(4), bar(5), bar(6)].map((t) => new Date(t).toISOString()),
+    );
   });
 
   it('refuses a timeframe with no candles', () => {

@@ -207,7 +207,9 @@ export class BybitAdapter implements LiveExecutionPort {
     }
     if (signal.direction !== Direction.Long) {
       // Spot cannot short; a short signal must not be silently turned into a sell.
-      throw new Error('Spot trading supports long entries only; configure a linear market to short');
+      throw new Error(
+        'Spot trading supports long entries only; configure a linear market to short',
+      );
     }
 
     const market = this.requireMarket();
@@ -267,7 +269,9 @@ export class BybitAdapter implements LiveExecutionPort {
       symbol: this.symbol,
       exchangeOrderId: placed.id,
     });
-    this.log(`entry placed: ${amount} @ ${entry} (tp ${takeProfit}, sl ${stopLoss}) id ${placed.id}`);
+    this.log(
+      `entry placed: ${amount} @ ${entry} (tp ${takeProfit}, sl ${stopLoss}) id ${placed.id}`,
+    );
     return order;
   }
 
@@ -324,7 +328,11 @@ export class BybitAdapter implements LiveExecutionPort {
           state.order.fillTime = fillTime;
           settledEntries.push(state.order);
           this.openPosition(state.order, fillPrice, fillTime, order.filled);
-        } else if (order.status === 'canceled' || order.status === 'rejected' || order.status === 'expired') {
+        } else if (
+          order.status === 'canceled' ||
+          order.status === 'rejected' ||
+          order.status === 'expired'
+        ) {
           this.resting = null;
           state.order.status = order.status === 'expired' ? 'expired' : 'cancelled';
           settledEntries.push(state.order);
@@ -419,7 +427,9 @@ export class BybitAdapter implements LiveExecutionPort {
 
     // Clear any working exit first, or the venue may reject the market sell
     // for lack of free balance.
-    const open = await this.retry('fetchOpenOrders', () => this.client.fetchOpenOrders(this.symbol));
+    const open = await this.retry('fetchOpenOrders', () =>
+      this.client.fetchOpenOrders(this.symbol),
+    );
     for (const order of open) {
       await this.retry('cancelOrder', () => this.client.cancelOrder(this.symbol, order.id));
     }
@@ -440,7 +450,9 @@ export class BybitAdapter implements LiveExecutionPort {
 
   private assertTradeable(market: MarketSpec, amount: number, price: number): void {
     if (!(amount > 0)) {
-      throw new Error(`Position size rounds to ${amount}: balance too small for this stop distance`);
+      throw new Error(
+        `Position size rounds to ${amount}: balance too small for this stop distance`,
+      );
     }
     if (market.minAmount !== null && amount < market.minAmount) {
       throw new Error(
@@ -494,7 +506,8 @@ export class BybitAdapter implements LiveExecutionPort {
     this.closed.push(trade);
 
     const dollarPnl = trade.positionSize * (price - trade.entryPrice);
-    this.cachedBalance += dollarPnl - trade.positionSize * (trade.entryPrice + price) * this.feeRate;
+    this.cachedBalance +=
+      dollarPnl - trade.positionSize * (trade.entryPrice + price) * this.feeRate;
 
     this.record({
       type: 'position_closed',
@@ -533,7 +546,9 @@ export class BybitAdapter implements LiveExecutionPort {
         await this.sleep(delay);
       }
     }
-    throw new Error(`${label} failed after ${this.maxRetries + 1} attempts: ${(lastError as Error).message}`);
+    throw new Error(
+      `${label} failed after ${this.maxRetries + 1} attempts: ${(lastError as Error).message}`,
+    );
   }
 
   private record(event: JournalEvent): void {
@@ -576,7 +591,11 @@ export class BybitAdapter implements LiveExecutionPort {
         }
         this.resting = null;
         if (event.status === 'filled') {
-          this.openPositionSilently(state.order, event.fillPrice as number, event.fillTime as number);
+          this.openPositionSilently(
+            state.order,
+            event.fillPrice as number,
+            event.fillTime as number,
+          );
         }
         return;
       }

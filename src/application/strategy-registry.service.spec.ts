@@ -90,9 +90,9 @@ describe('ReportService', () => {
 
   it('numbers trade files so they sort', () => {
     const trade = { pnlPct: -0.0175 } as { pnlPct: number };
-    expect(
-      ReportService.tradeFilename('frankfurt_ib_50', 3, trade as never, 2),
-    ).toBe('frankfurt_ib_50_trade_03_m1_75pct.html');
+    expect(ReportService.tradeFilename('frankfurt_ib_50', 3, trade as never, 2)).toBe(
+      'frankfurt_ib_50_trade_03_m1_75pct.html',
+    );
   });
 
   describe('path handling', () => {
@@ -102,7 +102,12 @@ describe('ReportService', () => {
       writeFileSync(join(dir, 'b.txt'), 'b');
       writeFileSync(join(dir, 'ignored.json'), '{}');
 
-      expect(service.list().map((file) => file.filename).sort()).toEqual(['a.html', 'b.txt']);
+      expect(
+        service
+          .list()
+          .map((file) => file.filename)
+          .sort(),
+      ).toEqual(['a.html', 'b.txt']);
     });
 
     it('is empty when the directory does not exist yet', () => {

@@ -176,8 +176,8 @@ describe('SnrDetector', () => {
   });
 
   it('stamps the configured timeframe on every zone', () => {
-    expect(detect(RES_HIGHS, RES_LOWS, { timeframe: '4h' }).every((p) => p.timeframe === '4h')).toBe(
-      true,
-    );
+    expect(
+      detect(RES_HIGHS, RES_LOWS, { timeframe: '4h' }).every((p) => p.timeframe === '4h'),
+    ).toBe(true);
   });
 });

@@ -250,12 +250,7 @@ export class BacktestAdapter implements ExecutionPort {
     };
   }
 
-  private closeTrade(
-    symbol: string,
-    price: number,
-    time: number,
-    reason: ExitReason,
-  ): void {
+  private closeTrade(symbol: string, price: number, time: number, reason: ExitReason): void {
     const trade = this.openPositions.get(symbol);
     if (trade === undefined) {
       return;

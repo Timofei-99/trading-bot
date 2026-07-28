@@ -2,8 +2,10 @@ import { barTime, candlesFromHighsLows } from '../../test/fixtures/candles';
 import { Pattern, PatternType } from '../domain/pattern';
 import { LiquidityDetector } from './liquidity.detector';
 
-const detect = (candles: Parameters<LiquidityDetector['detect']>[0], timeframe?: string): Pattern[] =>
-  new LiquidityDetector({ swingLength: 1, timeframe }).detect(candles);
+const detect = (
+  candles: Parameters<LiquidityDetector['detect']>[0],
+  timeframe?: string,
+): Pattern[] => new LiquidityDetector({ swingLength: 1, timeframe }).detect(candles);
 
 const buySide = (patterns: Pattern[]): Pattern[] => patterns.filter((p) => p.meta.side === 'buy');
 const sellSide = (patterns: Pattern[]): Pattern[] => patterns.filter((p) => p.meta.side === 'sell');

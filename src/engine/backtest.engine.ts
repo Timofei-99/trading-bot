@@ -60,9 +60,7 @@ export class BacktestEngine {
     // Resolve every timeframe once; re-fetching inside the loop would cost a
     // map lookup per bar per timeframe for nothing.
     const timeframes = [...this.context.timeframes];
-    const series: CandleSeries[] = timeframes.map((timeframe) =>
-      this.context.candles(timeframe),
-    );
+    const series: CandleSeries[] = timeframes.map((timeframe) => this.context.candles(timeframe));
 
     for (let i = 0; i < allCandles.length; i++) {
       const currentTime = allCandles.time[i];

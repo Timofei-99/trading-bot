@@ -131,10 +131,7 @@ describe('FvgDetector', () => {
     //  H: 10  18  20  24  22  30  35
     //  L:  5  11  12  10  18  24  26
     // gap #1 at triplet (0,1,2) -> [10, 12]; gap #2 at (4,5,6) -> [22, 26].
-    const candles = candlesFromHighsLows(
-      [10, 18, 20, 24, 22, 30, 35],
-      [5, 11, 12, 10, 18, 24, 26],
-    );
+    const candles = candlesFromHighsLows([10, 18, 20, 24, 22, 30, 35], [5, 11, 12, 10, 18, 24, 26]);
     const bullish = new FvgDetector().detect(candles).filter((p) => p.meta.direction === 'bullish');
 
     expect(bullish).toHaveLength(2);

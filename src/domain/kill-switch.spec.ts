@@ -90,7 +90,11 @@ describe('KillSwitch', () => {
     const guard = (): KillSwitch => new KillSwitch({ maxConsecutiveLosses: 3 });
 
     it('counts backwards from the most recent trade', () => {
-      const trades = [closedTrade(-0.01, T0), closedTrade(-0.01, T0 + 1), closedTrade(-0.01, T0 + 2)];
+      const trades = [
+        closedTrade(-0.01, T0),
+        closedTrade(-0.01, T0 + 1),
+        closedTrade(-0.01, T0 + 2),
+      ];
       expect(guard().evaluate(trades, T0 + 3)).toMatch(/3 consecutive losing trades/);
     });
 

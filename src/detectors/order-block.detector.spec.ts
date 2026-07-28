@@ -2,12 +2,7 @@ import { barTime, candlesFromOhlc, OhlcRow } from '../../test/fixtures/candles';
 import { Pattern, PatternType } from '../domain/pattern';
 import { OrderBlockDetector } from './order-block.detector';
 
-function rows(
-  opens: number[],
-  highs: number[],
-  lows: number[],
-  closes: number[],
-): OhlcRow[] {
+function rows(opens: number[], highs: number[], lows: number[], closes: number[]): OhlcRow[] {
   return opens.map((open, i) => ({ open, high: highs[i], low: lows[i], close: closes[i] }));
 }
 
@@ -42,7 +37,9 @@ const BEAR = rows(
 describe('OrderBlockDetector', () => {
   describe('edge cases', () => {
     it('needs 2 * swingLength + 1 bars', () => {
-      const candles = candlesFromOhlc(rows([10, 9, 8, 7], [11, 10, 9, 8], [9, 8, 7, 6], [9, 8, 7, 8]));
+      const candles = candlesFromOhlc(
+        rows([10, 9, 8, 7], [11, 10, 9, 8], [9, 8, 7, 6], [9, 8, 7, 8]),
+      );
       expect(new OrderBlockDetector({ swingLength: 2 }).detect(candles)).toEqual([]);
     });
 

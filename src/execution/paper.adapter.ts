@@ -229,9 +229,17 @@ export class PaperAdapter implements LiveExecutionPort {
     }
     const seen = this.lastSeen.get(symbol);
     if (seen === undefined) {
-      throw new Error(`No market data seen for ${symbol} yet — sync() must run before closePosition`);
+      throw new Error(
+        `No market data seen for ${symbol} yet — sync() must run before closePosition`,
+      );
     }
-    return this.close(symbol, trade, this.slipped(seen.close, trade.signal.direction), seen.time, reason);
+    return this.close(
+      symbol,
+      trade,
+      this.slipped(seen.close, trade.signal.direction),
+      seen.time,
+      reason,
+    );
   }
 
   // -------------------------------------------------------------------------
@@ -263,7 +271,13 @@ export class PaperAdapter implements LiveExecutionPort {
     }
 
     if (expiryTime !== null && candle.time >= expiryTime) {
-      return this.close(symbol, trade, this.slipped(candle.close, direction), candle.time, 'expiry');
+      return this.close(
+        symbol,
+        trade,
+        this.slipped(candle.close, direction),
+        candle.time,
+        'expiry',
+      );
     }
     return null;
   }

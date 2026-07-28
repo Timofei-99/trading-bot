@@ -10,9 +10,7 @@ describe('parseInstant', () => {
   });
 
   it('accepts an explicit offset', () => {
-    expect(parseInstant('2023-06-01T12:30:00+02:00', '--start')).toBe(
-      Date.UTC(2023, 5, 1, 10, 30),
-    );
+    expect(parseInstant('2023-06-01T12:30:00+02:00', '--start')).toBe(Date.UTC(2023, 5, 1, 10, 30));
   });
 
   it('rejects a time without a zone, naming the fix', () => {

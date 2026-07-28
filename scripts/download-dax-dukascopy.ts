@@ -45,7 +45,7 @@ async function fetchHour(
     'https://datafeed.dukascopy.com/datafeed',
     INSTRUMENT,
     String(year),
-    pad(month0),   // Dukascopy uses 0-indexed months in the URL
+    pad(month0), // Dukascopy uses 0-indexed months in the URL
     pad(day),
     `${pad(hour)}h_ticks.bi5`,
   ].join('/');
@@ -76,10 +76,7 @@ function decompress(data: Buffer): Promise<Buffer> {
 
 // ─── Binary parsing ───────────────────────────────────────────────────────────
 
-function parseTicks(
-  raw: Buffer,
-  hourStartMs: number,
-): { ms: number; mid: number; vol: number }[] {
+function parseTicks(raw: Buffer, hourStartMs: number): { ms: number; mid: number; vol: number }[] {
   const ticks: { ms: number; mid: number; vol: number }[] = [];
   for (let i = 0; i + BYTES_PER_TICK <= raw.length; i += BYTES_PER_TICK) {
     const msOffset = raw.readUInt32BE(i);
@@ -157,7 +154,9 @@ async function main(): Promise<void> {
   if (args[1]) toDate.setTime(utcMidnight(args[1]).getTime());
 
   console.log(`Downloading ${INSTRUMENT} M1 from Dukascopy`);
-  console.log(`Period: ${fromDate.toISOString().slice(0, 10)} → ${toDate.toISOString().slice(0, 10)}`);
+  console.log(
+    `Period: ${fromDate.toISOString().slice(0, 10)} → ${toDate.toISOString().slice(0, 10)}`,
+  );
   console.log(`Output: ${OUTPUT_PATH}\n`);
 
   mkdirSync('data', { recursive: true });

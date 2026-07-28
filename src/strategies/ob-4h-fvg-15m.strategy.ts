@@ -152,15 +152,13 @@ export class Ob4hFvg15mStrategy extends Strategy {
     orderBlock: Pattern,
     currentTime: number,
   ): Pattern | null {
-    const fvgs = new FvgDetector({ timeframe: this.ltf })
-      .detect(ltfCandles)
-      .filter(
-        (p) =>
-          p.meta.direction === 'bullish' &&
-          p.endTime === currentTime && // the first touch is happening on this bar
-          p.low < orderBlock.high &&
-          p.high > orderBlock.low,
-      );
+    const fvgs = new FvgDetector({ timeframe: this.ltf }).detect(ltfCandles).filter(
+      (p) =>
+        p.meta.direction === 'bullish' &&
+        p.endTime === currentTime && // the first touch is happening on this bar
+        p.low < orderBlock.high &&
+        p.high > orderBlock.low,
+    );
 
     return latestByStartTime(fvgs);
   }

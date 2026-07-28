@@ -52,7 +52,9 @@ function htfCandles(): CandleSeries {
  *   a bullish FVG across bars 24-26: [91.5, 93.0], overlapping the block
  *   bar 29 dipping to 92.5, which mitigates that gap on the current bar
  */
-function ltfCandles(overrides: (o: number[], h: number[], l: number[], c: number[]) => void = () => {}): CandleSeries {
+function ltfCandles(
+  overrides: (o: number[], h: number[], l: number[], c: number[]) => void = () => {},
+): CandleSeries {
   const n = 30;
   const opens = Array<number>(n).fill(94);
   const highs = Array<number>(n).fill(96);
@@ -186,9 +188,7 @@ describe('Ob4hFvg15mStrategy', () => {
     it('needs a liquidity sweep inside the lookback window', () => {
       // The sweep sits at bar 22; a 4-bar window only reaches back to bar 26.
       expect(
-        strategy({ liquiditySweepLookback: 4 }).checkEntry(
-          contextOf(htfCandles(), ltfCandles()),
-        ),
+        strategy({ liquiditySweepLookback: 4 }).checkEntry(contextOf(htfCandles(), ltfCandles())),
       ).toBeNull();
     });
 

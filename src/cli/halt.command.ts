@@ -30,7 +30,9 @@ export class HaltCommand extends CommandRunner {
 
     console.log(`halted: ${event.reason}`);
     console.log('The bot will stop opening positions at its next tick.');
-    console.log('An OPEN POSITION IS LEFT ALONE — its stop is at the venue. Close it yourself if you want out.');
+    console.log(
+      'An OPEN POSITION IS LEFT ALONE — its stop is at the venue. Close it yourself if you want out.',
+    );
   }
 
   @Option({ flags: '--journal <path>', description: 'Journal file of the bot to stop' })

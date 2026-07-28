@@ -64,7 +64,11 @@ describe('PaperAdapter', () => {
     it('caps the position by what the wallet can buy, fees included', async () => {
       // Risk sizing alone would ask for 10000*0.01/0.1 = 1000 units of a
       // 100-priced asset — a 100k notional on a 10k wallet.
-      const adapter = new PaperAdapter({ initialBalance: 10_000, riskPerTrade: 0.01, feeRate: 0.001 });
+      const adapter = new PaperAdapter({
+        initialBalance: 10_000,
+        riskPerTrade: 0.01,
+        feeRate: 0.001,
+      });
       const order = await adapter.placeEntry(makeSignal(100, 99.9, 104));
 
       expect(order.positionSize).toBeCloseTo(10_000 / (100 * 1.001), 9);

@@ -34,10 +34,9 @@ export function loadExchangeCredentials(options: LoadCredentialsOptions = {}): E
   const apiKey = (env[KEY_VAR] ?? '').trim();
   const secret = (env[SECRET_VAR] ?? '').trim();
 
-  const missing = [
-    apiKey === '' ? KEY_VAR : null,
-    secret === '' ? SECRET_VAR : null,
-  ].filter((name): name is string => name !== null);
+  const missing = [apiKey === '' ? KEY_VAR : null, secret === '' ? SECRET_VAR : null].filter(
+    (name): name is string => name !== null,
+  );
 
   if (missing.length > 0) {
     throw new Error(
@@ -62,7 +61,9 @@ export function loadExchangeCredentials(options: LoadCredentialsOptions = {}): E
 
   const rawCategory = (env[CATEGORY_VAR] ?? 'spot').trim().toLowerCase();
   if (rawCategory !== 'spot' && rawCategory !== 'linear') {
-    throw new Error(`${CATEGORY_VAR} must be "spot" or "linear", got ${JSON.stringify(rawCategory)}`);
+    throw new Error(
+      `${CATEGORY_VAR} must be "spot" or "linear", got ${JSON.stringify(rawCategory)}`,
+    );
   }
 
   return {
@@ -77,9 +78,7 @@ export function loadExchangeCredentials(options: LoadCredentialsOptions = {}): E
 /** A one-line summary safe to print: the secret never appears. */
 export function describeCredentials(credentials: ExchangeCredentials): string {
   const fingerprint =
-    credentials.apiKey.length <= 4
-      ? '****'
-      : `${credentials.apiKey.slice(0, 4)}…${'*'.repeat(4)}`;
+    credentials.apiKey.length <= 4 ? '****' : `${credentials.apiKey.slice(0, 4)}…${'*'.repeat(4)}`;
   return (
     `${credentials.exchangeId} ${credentials.category} ` +
     `${credentials.sandbox ? 'TESTNET' : 'LIVE — REAL FUNDS'} (key ${fingerprint})`

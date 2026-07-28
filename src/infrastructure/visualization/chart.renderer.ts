@@ -29,7 +29,9 @@ export interface RenderChartOptions {
 export function renderChart(options: RenderChartOptions): PlotlyFigure {
   const all = options.context.candles(options.timeframe);
   if (all.isEmpty) {
-    throw new Error(`MarketContext has no candles for timeframe ${JSON.stringify(options.timeframe)}`);
+    throw new Error(
+      `MarketContext has no candles for timeframe ${JSON.stringify(options.timeframe)}`,
+    );
   }
 
   const candles = all.between(
@@ -197,11 +199,7 @@ function drawLiquidity(
   });
 }
 
-function drawStructureBreak(
-  builder: PlotlyFigureBuilder,
-  pattern: Pattern,
-  refs: AxisRefs,
-): void {
+function drawStructureBreak(builder: PlotlyFigureBuilder, pattern: Pattern, refs: AxisRefs): void {
   const bullish = (pattern.meta.direction ?? 'bullish') === 'bullish';
   const isBos = pattern.type === PatternType.Bos;
   const color = isBos
@@ -285,11 +283,7 @@ function drawSnr(
 ): void {
   const broken = pattern.meta.broken === true;
   const support = (pattern.meta.side ?? 'support') === 'support';
-  const fillcolor = broken
-    ? style.SNR_BROKEN
-    : support
-      ? style.SNR_SUPPORT
-      : style.SNR_RESISTANCE;
+  const fillcolor = broken ? style.SNR_BROKEN : support ? style.SNR_SUPPORT : style.SNR_RESISTANCE;
 
   builder.addRect({
     x0: pattern.startTime,
@@ -331,12 +325,7 @@ function drawInitialBalance(
   }
 }
 
-function drawTradeMarker(
-  builder: PlotlyFigureBuilder,
-  trade: Trade,
-  x0: number,
-  x1: number,
-): void {
+function drawTradeMarker(builder: PlotlyFigureBuilder, trade: Trade, x0: number, x1: number): void {
   if (trade.entryTime < x0 || trade.entryTime > x1) {
     return;
   }

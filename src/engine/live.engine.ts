@@ -165,7 +165,7 @@ export class LiveEngine {
     for (const trade of syncResult.closed) {
       this.log(
         `closed ${trade.exitReason} @ ${trade.exitPrice} ` +
-          `(pnl ${(((trade.pnlPct ?? 0) * 100).toFixed(3))}%)`,
+          `(pnl ${((trade.pnlPct ?? 0) * 100).toFixed(3)}%)`,
       );
     }
     for (const order of syncResult.settledEntries) {
@@ -289,8 +289,7 @@ export class LiveEngine {
     for (const timeframe of this.timeframes) {
       const tfMs = this.timeframeMs(timeframe);
       const known = this.series.get(timeframe) ?? CandleSeries.empty();
-      const startMs =
-        known.lastTime === null ? nowMs - (this.window + 1) * tfMs : known.lastTime;
+      const startMs = known.lastTime === null ? nowMs - (this.window + 1) * tfMs : known.lastTime;
 
       const fetched = await this.data.getCandles({
         symbol: this.symbol,
@@ -302,10 +301,7 @@ export class LiveEngine {
       if (closed.isEmpty) {
         continue;
       }
-      this.series.set(
-        timeframe,
-        CandleSeries.mergeDedupe([known, closed]).tail(this.window * 2),
-      );
+      this.series.set(timeframe, CandleSeries.mergeDedupe([known, closed]).tail(this.window * 2));
     }
   }
 
@@ -322,7 +318,11 @@ export class LiveEngine {
       return true;
     }
     const dailyPnl = dailyRealizedPnl(await this.adapter.getClosedTrades(), nowMs);
-    const allowed = this.riskManager.validateSignal(signal, await this.adapter.getBalance(), dailyPnl);
+    const allowed = this.riskManager.validateSignal(
+      signal,
+      await this.adapter.getBalance(),
+      dailyPnl,
+    );
     if (!allowed) {
       this.log(`risk gate: entry skipped (daily pnl ${(dailyPnl * 100).toFixed(2)}%)`);
     }
