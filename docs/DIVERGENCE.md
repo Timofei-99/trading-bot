@@ -32,7 +32,7 @@ date; everything about the trigger, the stop and the target changed.
 
 - The run was removed from `test/parity/strategies-e2e.parity.spec.ts`. It is
   the only bundled strategy **without** an end-to-end parity gate; its
-  correctness rests on `src/strategies/frankfurt-ib-50.strategy.spec.ts`
+  correctness rests on `packages/core/src/strategies/frankfurt-ib-50.strategy.spec.ts`
   alone. Treat changes to it with more care than the other two.
 - `test/fixtures/golden/trades/frankfurt_ib50_synth.json` and
   `test/fixtures/golden/reports/frankfurt_ib50_synth.json` describe **v1.0**
@@ -57,5 +57,5 @@ serve as the oracle.
 
 Not ported. On `master` it was a stub whose every method raised
 `NotImplementedError`; the TypeScript stack ships a working Bybit adapter
-(`src/infrastructure/execution/bybit.adapter.ts`) instead. There is no
+(`packages/infra/src/execution/bybit.adapter.ts`) instead. There is no
 behaviour to be parity-checked against.

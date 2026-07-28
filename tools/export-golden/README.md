@@ -26,7 +26,7 @@ summation in 3.12. `gross_profit`, `gross_loss`, `total_pnl_pct` and the
 `profit_factor` derived from them differ in the last bits between the two.
 `manifest.json` pins 3.11.15 for this reason, and the TypeScript
 `BacktestAdapter.report()` mirrors the naive accumulation deliberately
-(`src/execution/backtest.adapter.ts:201`).
+(`packages/core/src/execution/backtest.adapter.ts:201`).
 
 ### Why it derives reports from trades
 

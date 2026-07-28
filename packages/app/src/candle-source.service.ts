@@ -1,0 +1,79 @@
+import { Injectable } from '@nestjs/common';
+
+import { CandleSeries } from '@bot/core/domain/candle-series';
+import { CachedCandleRepository } from '@bot/infra/market-data/cached-candle.repository';
+import { CcxtCandleRepository } from '@bot/infra/market-data/ccxt-candle.repository';
+import { loadMt5Csv } from '@bot/infra/market-data/mt5-csv.loader';
+import { NdjsonCacheStore } from '@bot/infra/market-data/ndjson-cache.store';
+import { YahooCandleRepository } from '@bot/infra/market-data/yahoo-candle.repository';
+import { BacktestDataRequest } from './backtest-runner.service';
+
+export interface CandleSourceOptions {
+  readonly cacheDir?: string;
+  readonly verbose?: boolean;
+}
+
+/**
+ * Picks the repository behind a `source` name and hands back candles.
+ *
+ * This is the anti-corruption boundary: everything downstream sees a
+ * `CandleSeries`, never a ccxt response, a Yahoo quote or a broker CSV row.
+ */
+@Injectable()
+export class CandleSourceService {
+  private readonly cache: NdjsonCacheStore;
+
+  constructor(private readonly options: CandleSourceOptions = {}) {
+    this.cache = new NdjsonCacheStore(options.cacheDir ?? 'data/cache');
+  }
+
+  async load(request: BacktestDataRequest, timeframe: string): Promise<CandleSeries> {
+    switch (request.source) {
+      case 'binance': {
+        const repository = new CachedCandleRepository(
+          new CcxtCandleRepository({ exchangeId: 'binance', verbose: this.options.verbose }),
+          this.cache,
+          { source: 'binance', verbose: this.options.verbose },
+        );
+        return repository.getCandles({
+          symbol: request.symbol,
+          timeframe,
+          startMs: request.startMs,
+          endMs: request.endMs,
+        });
+      }
+
+      case 'yahoo': {
+        const repository = new YahooCandleRepository({ verbose: this.options.verbose });
+        return repository.getCandles({
+          symbol: request.symbol,
+          timeframe,
+          startMs: request.startMs,
+          endMs: request.endMs,
+        });
+      }
+
+      case 'mt5': {
+        if (request.csvPath === undefined) {
+          throw new Error('An MT5 backtest needs csvPath');
+        }
+        const { series, rows, ambiguousRows } = loadMt5Csv(request.csvPath, {
+          sourceTz: request.sourceTz,
+        });
+        if (ambiguousRows > 0) {
+          // Never let this pass unnoticed: the bars exist in the file but not
+          // in the replay, and the counts would otherwise silently disagree.
+          console.warn(
+            `${request.csvPath}: ${ambiguousRows} of ${rows.length} bars fall in the repeated ` +
+              `daylight-saving hour and were left out of the replay. Pass ambiguousPolicy ` +
+              `'earlier' or 'later' to keep them.`,
+          );
+        }
+        return series.between(request.startMs, request.endMs);
+      }
+
+      default:
+        throw new Error(`Unknown data source: ${String(request.source)}`);
+    }
+  }
+}

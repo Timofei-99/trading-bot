@@ -1,0 +1,27 @@
+{
+  // The wide net: every .ts in the repo, specs and tooling included, checked as
+  // one program with no emit.
+  //
+  // This does NOT enforce package boundaries — it maps every alias, so any file
+  // can reach any other. Enforcement is `tsc -b` against the per-package
+  // projects; this pass exists so that spec, test and script files are not
+  // silently unchecked, which is how scripts/ went 443 lines without a
+  // typecheck.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "baseUrl": ".",
+    "paths": {
+      "@bot/core/*": ["packages/core/src/*"],
+      "@bot/infra/*": ["packages/infra/src/*"],
+      "@bot/app/*": ["packages/app/src/*"],
+      "@bot/api/*": ["apps/api/src/*"],
+      "@bot/cli/*": ["apps/cli/src/*"]
+    }
+  },
+  "include": ["packages/*/src/**/*.ts", "apps/*/src/**/*.ts", "test/**/*.ts", "scripts/**/*.ts"],
+  "exclude": ["node_modules", "**/dist", "coverage"]
+}

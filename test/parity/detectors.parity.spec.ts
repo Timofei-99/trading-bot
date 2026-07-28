@@ -8,10 +8,10 @@ import {
   PremiumDiscountDetector,
   SnrDetector,
   StructureDetector,
-} from '../../src/detectors';
-import { KillzoneWindow } from '../../src/detectors/killzone.detector';
-import { Pattern } from '../../src/domain/pattern';
-import { Detector } from '../../src/domain/ports';
+} from '@bot/core/detectors';
+import { KillzoneWindow } from '@bot/core/detectors/killzone.detector';
+import { Pattern } from '@bot/core/domain/pattern';
+import { Detector } from '@bot/core/domain/ports';
 import {
   GoldenPattern,
   GoldenPatternFile,

@@ -1,0 +1,34 @@
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "target": "ES2022",
+    "lib": ["ES2023"],
+    "types": ["node", "jest"],
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "sourceMap": true,
+    "incremental": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "forceConsistentCasingInFileNames": true,
+    "strict": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+
+    // Deliberate exception to `strict`: the detectors are dense numeric loops
+    // over typed arrays. Requiring a non-null assertion on every index access
+    // would obscure the port and add a place to get it wrong, without catching
+    // anything the bounds checks in the loops do not already guarantee.
+    "noUncheckedIndexedAccess": false,
+
+    // Required for project references. Each package emits declarations that
+    // its dependents typecheck against, which is what turns an illegal import
+    // into a compile error rather than a lint warning.
+    "composite": true,
+    "declaration": true,
+    "declarationMap": true
+  }
+}

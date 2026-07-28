@@ -3,24 +3,36 @@ module.exports = {
   rootDir: '.',
   testEnvironment: 'node',
   testMatch: [
-    '<rootDir>/src/**/*.spec.ts',
+    '<rootDir>/packages/*/src/**/*.spec.ts',
+    '<rootDir>/apps/*/src/**/*.spec.ts',
     '<rootDir>/scripts/**/*.spec.ts',
     '<rootDir>/test/**/*.spec.ts',
     '<rootDir>/test/**/*.e2e-spec.ts',
   ],
+  // Tests run against package SOURCE, not built output, so `npm test` never
+  // depends on `npm run build` being current. The package boundary is enforced
+  // by `tsc -b`, not here.
+  moduleNameMapper: {
+    '^@bot/core/(.*)$': '<rootDir>/packages/core/src/$1',
+    '^@bot/infra/(.*)$': '<rootDir>/packages/infra/src/$1',
+    '^@bot/app/(.*)$': '<rootDir>/packages/app/src/$1',
+    '^@bot/api/(.*)$': '<rootDir>/apps/api/src/$1',
+    '^@bot/cli/(.*)$': '<rootDir>/apps/cli/src/$1',
+  },
   transform: {
     '^.+\\.(t|j)s$': '@swc/jest',
   },
   moduleFileExtensions: ['js', 'json', 'ts'],
-  modulePathIgnorePatterns: ['<rootDir>/dist/'],
+  modulePathIgnorePatterns: ['<rootDir>/dist/', '/dist/'],
   testPathIgnorePatterns: ['/node_modules/', '/dist/'],
   collectCoverageFrom: [
-    'src/**/*.ts',
+    'packages/*/src/**/*.ts',
+    'apps/*/src/**/*.ts',
     'scripts/**/*.ts',
     // Entry points: argument wiring and a bootstrap call, nothing to assert
     // that an integration test would not cover better.
-    '!src/main.ts',
-    '!src/cli.ts',
+    '!apps/api/src/main.ts',
+    '!apps/cli/src/cli.ts',
   ],
   coverageDirectory: '<rootDir>/coverage',
   // A ratchet, not a target. Every number below is the coverage actually
@@ -35,10 +47,10 @@ module.exports = {
   // silent and expensive, a wrong CLI flag is loud and cheap.
   coverageThreshold: {
     global: { statements: 58, branches: 40, functions: 56, lines: 58 },
-    './src/domain/': { statements: 97, branches: 90, functions: 94, lines: 97 },
-    './src/detectors/': { statements: 98, branches: 95, functions: 92, lines: 98 },
-    './src/engine/': { statements: 86, branches: 77, functions: 76, lines: 86 },
-    './src/execution/': { statements: 95, branches: 85, functions: 100, lines: 95 },
+    './packages/core/src/domain/': { statements: 97, branches: 90, functions: 94, lines: 97 },
+    './packages/core/src/detectors/': { statements: 98, branches: 95, functions: 92, lines: 98 },
+    './packages/core/src/engine/': { statements: 86, branches: 77, functions: 76, lines: 86 },
+    './packages/core/src/execution/': { statements: 95, branches: 85, functions: 100, lines: 95 },
   },
   // Parity specs replay a year of bars through the engine; the default 5s
   // timeout is not enough for those.

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { BarTuple, CandleSeries } from '../../src/domain/candle-series';
+import { BarTuple, CandleSeries } from '@bot/core/domain/candle-series';
 
 export const GOLDEN_ROOT = join(__dirname, 'golden');
 

@@ -1,0 +1,14 @@
+{
+  "name": "@bot/core",
+  "version": "0.1.0",
+  "private": true,
+  "exports": {
+    "./detectors": "./dist/detectors/index.js",
+    "./strategies": "./dist/strategies/index.js",
+    "./*": "./dist/*.js"
+  },
+  "types": "./dist/index.d.ts",
+  "dependencies": {
+    "luxon": "^3.7.2"
+  }
+}

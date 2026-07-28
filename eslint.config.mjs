@@ -3,27 +3,23 @@ import tseslint from 'typescript-eslint';
 import prettier from 'eslint-config-prettier';
 
 /**
- * The layer boundary is enforced here rather than described in a README.
+ * The second line of defence on the layer boundary.
  *
- * `domain/`, `detectors/`, `strategies/`, `engine/` and `execution/` are plain
- * TypeScript: no Nest DI, no exchange clients, no filesystem. Everything that
- * talks to the outside world lives behind a port implemented in
- * `infrastructure/`, so the same strategy code can run under backtest, paper
- * and live execution without edits.
+ * The first is the compiler: each package's tsconfig maps only the aliases it
+ * is allowed to use, so `tsc -b` rejects `@bot/infra` inside `@bot/core`
+ * outright. What project references CANNOT catch is a package reaching for the
+ * outside world directly — `ccxt`, `node:fs` — because those are ordinary
+ * resolvable modules. That is what the rules below are for.
+ *
+ * `packages/core` is plain TypeScript: no Nest DI, no exchange clients, no
+ * filesystem. Everything that talks to the outside world lives behind a port
+ * implemented in `packages/infra`, which is what lets the same strategy run
+ * under backtest, paper and live execution without edits.
  */
-const PURE_LAYERS = [
-  'src/domain/**/*.ts',
-  'src/detectors/**/*.ts',
-  'src/strategies/**/*.ts',
-  'src/engine/**/*.ts',
-  'src/execution/**/*.ts',
-];
-
-const FORBIDDEN_IN_PURE_LAYERS = [
+const FORBIDDEN_IN_CORE = [
   {
     group: ['@nestjs/*', '@nestjs/**'],
-    message:
-      'Домен остаётся чистым TS. Nest DI живёт только в application/, infrastructure/, api/ и cli/.',
+    message: 'Домен остаётся чистым TS. Nest DI живёт только в app, infra, api и cli.',
   },
   {
     group: ['ccxt', 'yahoo-finance2'],
@@ -31,16 +27,24 @@ const FORBIDDEN_IN_PURE_LAYERS = [
   },
   {
     group: ['fs', 'node:fs', 'fs/promises', 'node:fs/promises', 'path', 'node:path'],
-    message: 'Файловый ввод-вывод — задача infrastructure/, домен не должен знать о диске.',
+    message: 'Файловый ввод-вывод — задача infra, домен не должен знать о диске.',
   },
   {
-    group: ['**/infrastructure/**', '**/application/**', '**/api/**', '**/cli/**'],
-    message: 'Зависимости направлены внутрь: внутренние слои не импортируют внешние.',
+    group: ['@bot/infra/**', '@bot/app/**', '@bot/api/**', '@bot/cli/**'],
+    message: 'Зависимости направлены внутрь: core не импортирует внешние слои.',
+  },
+];
+
+/** infra may touch the outside world, but still must not depend on app or up. */
+const FORBIDDEN_IN_INFRA = [
+  {
+    group: ['@bot/app/**', '@bot/api/**', '@bot/cli/**'],
+    message: 'infra ниже app: зависимости направлены внутрь.',
   },
 ];
 
 export default tseslint.config(
-  { ignores: ['dist/**', 'coverage/**', 'node_modules/**', 'reports/**'] },
+  { ignores: ['**/dist/**', 'coverage/**', 'node_modules/**', 'reports/**'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   prettier,
@@ -56,12 +60,15 @@ export default tseslint.config(
     },
   },
   {
-    files: PURE_LAYERS,
+    files: ['packages/core/src/**/*.ts'],
     rules: {
-      '@typescript-eslint/no-restricted-imports': [
-        'error',
-        { patterns: FORBIDDEN_IN_PURE_LAYERS },
-      ],
+      '@typescript-eslint/no-restricted-imports': ['error', { patterns: FORBIDDEN_IN_CORE }],
+    },
+  },
+  {
+    files: ['packages/infra/src/**/*.ts'],
+    rules: {
+      '@typescript-eslint/no-restricted-imports': ['error', { patterns: FORBIDDEN_IN_INFRA }],
     },
   },
 );

@@ -1,4 +1,4 @@
-import { BarTuple, CandleSeries } from '../../src/domain/candle-series';
+import { BarTuple, CandleSeries } from '@bot/core/domain/candle-series';
 
 export const MINUTE_MS = 60_000;
 export const HOUR_MS = 3_600_000;

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 
-import { parseMt5Csv } from '../../src/infrastructure/market-data/mt5-csv.loader';
+import { parseMt5Csv } from '@bot/infra/market-data/mt5-csv.loader';
 import { goldenPath, loadGolden } from '../fixtures/helpers';
 
 interface Mt5Expected {

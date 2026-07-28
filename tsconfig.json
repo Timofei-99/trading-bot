@@ -1,32 +1,16 @@
 {
-  "compilerOptions": {
-    "module": "commonjs",
-    "target": "ES2022",
-    "lib": ["ES2023"],
-    "types": ["node", "jest"],
-    "declaration": false,
-    "emitDecoratorMetadata": true,
-    "experimentalDecorators": true,
-    "allowSyntheticDefaultImports": true,
-    "esModuleInterop": true,
-    "sourceMap": true,
-    "outDir": "./dist",
-    "baseUrl": "./",
-    "incremental": true,
-    "skipLibCheck": true,
-    "resolveJsonModule": true,
-    "forceConsistentCasingInFileNames": true,
-    "strict": true,
-    "noFallthroughCasesInSwitch": true,
-    "noImplicitOverride": true,
-    "noImplicitReturns": true,
-
-    // Deliberate exception to `strict`: the detectors are dense numeric loops
-    // over typed arrays. Requiring a non-null assertion on every index access
-    // would obscure the port and add a place to get it wrong, without catching
-    // anything the bounds checks in the loops do not already guarantee.
-    "noUncheckedIndexedAccess": false
-  },
-  "include": ["src/**/*.ts", "test/**/*.ts", "scripts/**/*.ts"],
-  "exclude": ["node_modules", "dist", "coverage"]
+  // Build graph only. `tsc -b` walks these in dependency order, and each
+  // project sees ONLY the packages its own tsconfig maps — which is what makes
+  // an illegal import fail to compile instead of merely failing lint.
+  //
+  // Specs, test/ and scripts/ are deliberately absent here; they are covered by
+  // tsconfig.check.json, which typechecks without emitting.
+  "files": [],
+  "references": [
+    { "path": "packages/core" },
+    { "path": "packages/infra" },
+    { "path": "packages/app" },
+    { "path": "apps/api" },
+    { "path": "apps/cli" }
+  ]
 }

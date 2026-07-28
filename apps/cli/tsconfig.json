@@ -1,0 +1,38 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/.tsbuildinfo",
+    "baseUrl": "../..",
+    "paths": {
+      "@bot/core/*": [
+        "packages/core/src/*"
+      ],
+      "@bot/infra/*": [
+        "packages/infra/src/*"
+      ],
+      "@bot/app/*": [
+        "packages/app/src/*"
+      ]
+    }
+  },
+  "include": [
+    "src/**/*.ts"
+  ],
+  "exclude": [
+    "**/*.spec.ts",
+    "dist"
+  ],
+  "references": [
+    {
+      "path": "../../packages/core"
+    },
+    {
+      "path": "../../packages/infra"
+    },
+    {
+      "path": "../../packages/app"
+    }
+  ]
+}

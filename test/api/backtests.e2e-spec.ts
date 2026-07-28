@@ -6,9 +6,9 @@ import { join } from 'node:path';
 import request from 'supertest';
 import type { App } from 'supertest/types';
 
-import { ApiModule } from '../../src/api/api.module';
-import { CandleSourceService } from '../../src/application/candle-source.service';
-import { ReportService } from '../../src/application/report.service';
+import { ApiModule } from '@bot/api/api.module';
+import { CandleSourceService } from '@bot/app/candle-source.service';
+import { ReportService } from '@bot/app/report.service';
 import { loadGoldenCandles } from '../fixtures/helpers';
 
 /**

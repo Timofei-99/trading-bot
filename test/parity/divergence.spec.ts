@@ -1,4 +1,4 @@
-import { FrankfurtIb50Strategy } from '../../src/strategies';
+import { FrankfurtIb50Strategy } from '@bot/core/strategies';
 import { GoldenTradesFile, loadGolden } from '../fixtures/helpers';
 
 /**

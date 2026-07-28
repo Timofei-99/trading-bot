@@ -1,9 +1,9 @@
-import { MarketContext } from '../../src/domain/market-context';
-import { Strategy } from '../../src/domain/ports';
-import { Trade } from '../../src/domain/trade';
-import { BacktestEngine } from '../../src/engine/backtest.engine';
-import { BacktestAdapter, BacktestReport } from '../../src/execution/backtest.adapter';
-import { H1m3mClassicStrategy, Ob4hFvg15mStrategy } from '../../src/strategies';
+import { MarketContext } from '@bot/core/domain/market-context';
+import { Strategy } from '@bot/core/domain/ports';
+import { Trade } from '@bot/core/domain/trade';
+import { BacktestEngine } from '@bot/core/engine/backtest.engine';
+import { BacktestAdapter, BacktestReport } from '@bot/core/execution/backtest.adapter';
+import { H1m3mClassicStrategy, Ob4hFvg15mStrategy } from '@bot/core/strategies';
 import {
   GoldenNumber,
   GoldenReport,

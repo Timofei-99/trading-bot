@@ -36,6 +36,11 @@ jobs:
       - name: Install
         run: npm ci
 
+      # `npm run build` first: it is the only step that exercises the emitted
+      # `exports` maps, which jest (source) and tsc (declarations) both bypass.
+      - name: Build
+        run: npm run build
+
       - name: Verify
         run: npm run verify
 

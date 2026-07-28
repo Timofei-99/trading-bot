@@ -1,0 +1,15 @@
+{
+  "name": "@bot/infra",
+  "version": "0.1.0",
+  "private": true,
+  "exports": {
+    "./*": "./dist/*.js"
+  },
+  "types": "./dist/index.d.ts",
+  "dependencies": {
+    "@bot/core": "*",
+    "ccxt": "^4.5.68",
+    "yahoo-finance2": "^4.0.0",
+    "luxon": "^3.7.2"
+  }
+}

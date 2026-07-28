@@ -1,0 +1,14 @@
+{
+  "name": "@bot/app",
+  "version": "0.1.0",
+  "private": true,
+  "exports": {
+    "./*": "./dist/*.js"
+  },
+  "types": "./dist/index.d.ts",
+  "dependencies": {
+    "@bot/core": "*",
+    "@bot/infra": "*",
+    "@nestjs/common": "^11.1.28"
+  }
+}

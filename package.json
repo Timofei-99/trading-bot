@@ -5,39 +5,31 @@
   "license": "UNLICENSED",
   "private": true,
   "scripts": {
-    "build": "nest build",
-    "start": "nest start",
-    "start:dev": "nest start --watch",
-    "start:prod": "node dist/main",
-    "cli": "ts-node src/cli.ts",
-    "cli:prod": "node dist/cli",
-    "seed-cache": "ts-node scripts/seed-cache.ts",
-    "download-dax": "ts-node scripts/download-dax-dukascopy.ts",
-    "download-ger40": "ts-node scripts/download-ger40-oanda.ts",
+    "build": "tsc -b",
+    "build:clean": "tsc -b --clean",
+    "start": "npm run build && node apps/api/dist/main.js",
+    "start:dev": "ts-node -r tsconfig-paths/register apps/api/src/main.ts",
+    "cli": "ts-node -r tsconfig-paths/register apps/cli/src/cli.ts",
+    "cli:prod": "npm run build && node apps/cli/dist/cli.js",
+    "seed-cache": "ts-node -r tsconfig-paths/register scripts/seed-cache.ts",
+    "download-dax": "ts-node -r tsconfig-paths/register scripts/download-dax-dukascopy.ts",
+    "download-ger40": "ts-node -r tsconfig-paths/register scripts/download-ger40-oanda.ts",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
-    "test:unit": "jest --testPathPatterns '(src|scripts)/'",
+    "test:unit": "jest --testPathPatterns '(packages|apps|scripts)/'",
     "test:parity": "jest --testPathPatterns 'test/parity/'",
     "test:e2e": "jest --testPathPatterns 'test/api/'",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
-    "lint": "eslint src test scripts --no-error-on-unmatched-pattern",
-    "format": "prettier --write \"{src,test,scripts}/**/*.ts\"",
-    "format:check": "prettier --check \"{src,test,scripts}/**/*.ts\"",
+    "typecheck": "tsc -b && tsc --noEmit -p tsconfig.check.json",
+    "lint": "eslint packages apps test scripts --no-error-on-unmatched-pattern",
+    "format": "prettier --write \"{packages,apps,test,scripts}/**/*.ts\"",
+    "format:check": "prettier --check \"{packages,apps,test,scripts}/**/*.ts\"",
     "verify": "npm run format:check && npm run lint && npm run typecheck && npm test"
   },
   "dependencies": {
-    "@nestjs/common": "^11.1.28",
-    "@nestjs/core": "^11.1.28",
-    "@nestjs/platform-express": "^11.1.28",
-    "ccxt": "^4.5.68",
-    "class-transformer": "^0.5.1",
-    "class-validator": "^0.14.2",
     "luxon": "^3.7.2",
-    "nest-commander": "^3.20.1",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.2",
-    "yahoo-finance2": "^4.0.0"
+    "rxjs": "^7.8.2"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.0",
@@ -59,10 +51,21 @@
     "prettier": "^3.6.2",
     "supertest": "^7.1.4",
     "ts-node": "^10.9.2",
+    "tsconfig-paths": "^4.2.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.46.0"
   },
   "engines": {
     "node": ">=22"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "ts-node": {
+    "require": [
+      "tsconfig-paths/register"
+    ],
+    "project": "tsconfig.check.json"
   }
 }

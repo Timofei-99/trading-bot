@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { BarTuple, CandleSeries } from '../src/domain/candle-series';
-import { NdjsonCacheStore } from '../src/infrastructure/market-data/ndjson-cache.store';
+import { BarTuple, CandleSeries } from '@bot/core/domain/candle-series';
+import { NdjsonCacheStore } from '@bot/infra/market-data/ndjson-cache.store';
 
 /**
  * Fill the candle cache from the committed golden fixtures.

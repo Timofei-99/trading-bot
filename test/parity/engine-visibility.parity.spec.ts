@@ -1,8 +1,8 @@
-import { MarketContext } from '../../src/domain/market-context';
-import { Strategy } from '../../src/domain/ports';
-import { Signal } from '../../src/domain/signal';
-import { BacktestEngine } from '../../src/engine/backtest.engine';
-import { BacktestAdapter } from '../../src/execution/backtest.adapter';
+import { MarketContext } from '@bot/core/domain/market-context';
+import { Strategy } from '@bot/core/domain/ports';
+import { Signal } from '@bot/core/domain/signal';
+import { BacktestEngine } from '@bot/core/engine/backtest.engine';
+import { BacktestAdapter } from '@bot/core/execution/backtest.adapter';
 import { GoldenVisibilityFile, loadGolden, loadGoldenCandles } from '../fixtures/helpers';
 
 /**

@@ -49,7 +49,7 @@ TP и SL **прикреплены к ордеру входа** и исполня
 
 Это центральный инвариант, на нём держится осмысленность всех чисел.
 
-**В бэктесте.** На каждом баре `BacktestEngine` строит новый `MarketContext`, куда для **каждого** таймфрейма попадают только бары с `timestamp <= время текущего бара` (через `searchSortedRight` — строгая верхняя граница). Стратегия не может увидеть будущее, потому что оно ей физически не передано. Это свойство закреплено `src/engine/lookahead-bias.spec.ts` и трассой видимости в `test/parity/engine-visibility.parity.spec.ts`, сверенной с эталоном бар за баром на годовой истории.
+**В бэктесте.** На каждом баре `BacktestEngine` строит новый `MarketContext`, куда для **каждого** таймфрейма попадают только бары с `timestamp <= время текущего бара` (через `searchSortedRight` — строгая верхняя граница). Стратегия не может увидеть будущее, потому что оно ей физически не передано. Это свойство закреплено `packages/core/src/engine/lookahead-bias.spec.ts` и трассой видимости в `test/parity/engine-visibility.parity.spec.ts`, сверенной с эталоном бар за баром на годовой истории.
 
 **В живом режиме.** Биржа отдаёт последнюю, ещё формирующуюся свечу как обычный элемент ответа OHLCV — классический источник фантомной доходности у самописных ботов. `LiveEngine` фильтрует каждую серию по `visibleAt(now - timeframeMs)`: бар, открытый в `T` на таймфрейме `D`, становится видим только при `T + D <= now`. Формирующаяся свеча к стратегии не попадает никогда.
 
@@ -128,7 +128,7 @@ class MyStrategy extends Strategy {
 }
 ```
 
-Регистрация — одна запись в `BUILT_IN_STRATEGIES` (`src/application/strategy-registry.service.ts`): `id`, `version`, `requiredTimeframes`, `defaultParams`, `create`. После неё стратегия адресуема по строковому id в CLI, paper, live и REST.
+Регистрация — одна запись в `BUILT_IN_STRATEGIES` (`packages/app/src/strategy-registry.service.ts`): `id`, `version`, `requiredTimeframes`, `defaultParams`, `create`. После неё стратегия адресуема по строковому id в CLI, paper, live и REST.
 
 ### Семантика Signal
 
@@ -265,7 +265,7 @@ costs    : fee 0.001 per side, slippage 0
 ### 6.5. Типовой цикл работы над стратегией
 
 ```bash
-npx jest src/strategies/my                                   # свои unit-тесты
+npx jest packages/core/src/strategies/my                                   # свои unit-тесты
 npm run cli -- backtest --strategy my_strategy --fee 0.001 --trades
 npm run cli -- backtest --strategy my_strategy --fee 0.001 --slippage 0.0005 --worst-case
 npm run cli -- visualize                                     # глазами, HTML в reports/
@@ -274,7 +274,7 @@ npm run cli -- paper --strategy my_strategy                  # живой фид
 
 ### 6.6. Скелет своей стратегии
 
-`src/strategies/my.strategy.ts`:
+`packages/core/src/strategies/my.strategy.ts`:
 
 ```ts
 import { FvgDetector } from '../detectors/fvg.detector';
@@ -323,7 +323,7 @@ export class MyStrategy extends Strategy {
 }
 ```
 
-Регистрация — одна запись в `BUILT_IN_STRATEGIES` (`src/application/strategy-registry.service.ts`):
+Регистрация — одна запись в `BUILT_IN_STRATEGIES` (`packages/app/src/strategy-registry.service.ts`):
 
 ```ts
 {
@@ -383,8 +383,8 @@ npm run cli -- resume --journal data/journal/<file>.ndjson
 npm run cli -- strategies                                  # реестр с параметрами
 npm run cli -- visualize --chart-month 2023-02 --top 3     # HTML в reports/
 npm run start                                              # REST на 127.0.0.1:3000
-npm test | npm run lint | npm run build
-npx jest test/parity                                       # 128 паритетных тестов
+npm run verify                                             # format, lint, typecheck, test
+npx jest test/parity                                       # паритет с Python-эталоном
 ```
 
 ---
