@@ -69,11 +69,16 @@ describe('backtests API', () => {
   it('lists strategies with enough detail to build a request', async () => {
     const response = await request(server()).get('/api/strategies').expect(200);
 
-    expect(response.body).toHaveLength(3);
-    expect(response.body[0]).toMatchObject({
-      id: 'OB_4h_FVG_15m',
-      requiredTimeframes: ['4h', '15m'],
-    });
+    // Asserted by content, not by count: config/strategies/ is an operator's
+    // directory, and a test that breaks when someone drops a YAML file in it
+    // is testing their checkout rather than this endpoint.
+    expect(response.body).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'OB_4h_FVG_15m', requiredTimeframes: ['4h', '15m'] }),
+        expect.objectContaining({ id: 'frankfurt_ib_50', requiredTimeframes: ['1m'] }),
+        expect.objectContaining({ id: '1h3m_classic', requiredTimeframes: ['1h', '5m'] }),
+      ]),
+    );
   });
 
   describe('validation', () => {

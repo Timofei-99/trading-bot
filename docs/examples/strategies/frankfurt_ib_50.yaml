@@ -1,0 +1,18 @@
+# Frankfurt IB breakout, v2.0.
+#
+# NOT a port of the Python strategies/configs/frankfurt_ib_50.yaml — that file
+# describes v1.0 semantics (midpoint trigger, Europe/Berlin, swing stop) that
+# the TypeScript implementation deliberately no longer has. See
+# docs/DIVERGENCE.md.
+id: frankfurt_ib_50_yaml
+version: "2.0"
+description: >
+  Frankfurt IB high/low breakout into the London session, fixed 1:1 RR.
+implementation: frankfurt_ib_50
+timeframes: ["1m"]
+params:
+  ibStart: "08:00"
+  ibEnd: "09:00"
+  sessionEnd: "12:00"
+  sessionTz: "UTC"
+  timeframe: "1m"

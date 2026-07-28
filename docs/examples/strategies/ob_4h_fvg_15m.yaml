@@ -1,0 +1,20 @@
+# Port of the Python stack's strategies/configs/ob_4h_fvg_15m.yaml.
+#
+# `implementation` names a bundled strategy class; everything else here is
+# registration data. Copy this file, change the id and the params, and you have
+# a second strategy without touching TypeScript.
+id: OB_4h_FVG_15m_yaml
+version: "1.0"
+description: >
+  4h order block in discount, retested through a 15m FVG after a liquidity
+  sweep. Same implementation as the built-in OB_4h_FVG_15m, declared in YAML.
+implementation: OB_4h_FVG_15m
+timeframes: ["4h", "15m"]
+params:
+  htf: "4h"
+  ltf: "15m"
+  swingLengthHtf: 3
+  swingLengthLtf: 3
+  obLookback: 5
+  liquiditySweepLookback: 20
+  minRr: 2.0

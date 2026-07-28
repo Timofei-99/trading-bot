@@ -1,0 +1,22 @@
+# Defaults for the whole application — the counterpart of the Python stack's
+# config.yaml. Environment variables override individual keys; see
+# packages/infra/src/config/app-config.ts for the mapping.
+#
+# Credentials are NOT here and never will be: they come from the environment
+# only, so a config file can be committed without a second thought.
+exchange: binance
+symbol: BTC/USDT
+
+timeframes: ["1m", "15m", "1h", "4h", "1d"]
+
+risk:
+  perTrade: 0.01
+  maxDailyDrawdown: 0.03
+
+data:
+  maxCandles: 500
+  cacheDir: data/cache
+
+api:
+  host: 127.0.0.1
+  port: 3000
