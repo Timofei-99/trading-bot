@@ -17,8 +17,14 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
-    "lint": "eslint src test --no-error-on-unmatched-pattern",
-    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\""
+    "test:unit": "jest --testPathPatterns '(src|scripts)/'",
+    "test:parity": "jest --testPathPatterns 'test/parity/'",
+    "test:e2e": "jest --testPathPatterns 'test/api/'",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "eslint src test scripts --no-error-on-unmatched-pattern",
+    "format": "prettier --write \"{src,test,scripts}/**/*.ts\"",
+    "format:check": "prettier --check \"{src,test,scripts}/**/*.ts\"",
+    "verify": "npm run format:check && npm run lint && npm run typecheck && npm test"
   },
   "dependencies": {
     "@nestjs/common": "^11.1.28",

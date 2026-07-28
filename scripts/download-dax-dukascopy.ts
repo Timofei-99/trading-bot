@@ -24,13 +24,19 @@ const POINT_FACTOR = 10;
 const BYTES_PER_TICK = 20;
 const OUTPUT_PATH = join('data', 'dax_1m.csv');
 
-interface Bar {
+export interface Bar {
   ms: number;
   open: number;
   high: number;
   low: number;
   close: number;
   volume: number;
+}
+
+export interface Tick {
+  ms: number;
+  mid: number;
+  vol: number;
 }
 
 // ─── HTTP ────────────────────────────────────────────────────────────────────
@@ -76,8 +82,17 @@ function decompress(data: Buffer): Promise<Buffer> {
 
 // ─── Binary parsing ───────────────────────────────────────────────────────────
 
-function parseTicks(raw: Buffer, hourStartMs: number): { ms: number; mid: number; vol: number }[] {
-  const ticks: { ms: number; mid: number; vol: number }[] = [];
+/**
+ * Dukascopy's `.bi5` payload: fixed 20-byte records, big-endian, prices as
+ * integers scaled by `POINT_FACTOR` and the timestamp as a millisecond offset
+ * from the start of the hour the file covers.
+ *
+ * A trailing partial record is ignored rather than treated as an error — the
+ * feed occasionally serves a truncated hour, and losing its last tick is
+ * cheaper than losing the day.
+ */
+export function parseTicks(raw: Buffer, hourStartMs: number): Tick[] {
+  const ticks: Tick[] = [];
   for (let i = 0; i + BYTES_PER_TICK <= raw.length; i += BYTES_PER_TICK) {
     const msOffset = raw.readUInt32BE(i);
     const ask = raw.readUInt32BE(i + 4) / POINT_FACTOR;
@@ -91,7 +106,15 @@ function parseTicks(raw: Buffer, hourStartMs: number): { ms: number; mid: number
 
 // ─── OHLCV aggregation ────────────────────────────────────────────────────────
 
-function toMinuteBars(ticks: { ms: number; mid: number; vol: number }[]): Bar[] {
+/**
+ * Fold ticks into 1m OHLCV.
+ *
+ * Open and close are taken from the first and last tick **in input order**,
+ * so the caller must feed ticks chronologically — `main` does, hour by hour.
+ * Only the returned bars are sorted; sorting here would not repair open/close
+ * of an out-of-order input, so it would just hide the requirement.
+ */
+export function toMinuteBars(ticks: Tick[]): Bar[] {
   const map = new Map<number, Bar>();
   for (const { ms, mid, vol } of ticks) {
     const barMs = Math.floor(ms / 60_000) * 60_000;
@@ -110,7 +133,7 @@ function toMinuteBars(ticks: { ms: number; mid: number; vol: number }[]): Bar[] 
 
 // ─── CSV formatting (MT5 tab-separated, UTC) ──────────────────────────────────
 
-function toMt5Row(bar: Bar): string {
+export function toMt5Row(bar: Bar): string {
   const d = new Date(bar.ms);
   const date = `${d.getUTCFullYear()}.${pad(d.getUTCMonth() + 1)}.${pad(d.getUTCDate())}`;
   const time = `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:00`;
@@ -123,13 +146,13 @@ function pad(n: number): string {
   return String(n).padStart(2, '0');
 }
 
-function utcMidnight(iso: string): Date {
+export function utcMidnight(iso: string): Date {
   const d = new Date(iso + 'T00:00:00Z');
   if (isNaN(d.getTime())) throw new Error(`Invalid date: ${iso}`);
   return d;
 }
 
-function eachDay(from: Date, to: Date): Date[] {
+export function eachDay(from: Date, to: Date): Date[] {
   const days: Date[] = [];
   const cur = new Date(from);
   while (cur <= to) {
@@ -204,7 +227,11 @@ async function main(): Promise<void> {
   console.log('  npm run cli -- backtest:frankfurt --tz UTC');
 }
 
-main().catch((err: unknown) => {
-  console.error(err);
-  process.exit(1);
-});
+// Only run when invoked as a script. Without this an `import` from a test
+// would start a two-year download as a side effect of loading the module.
+if (require.main === module) {
+  main().catch((err: unknown) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

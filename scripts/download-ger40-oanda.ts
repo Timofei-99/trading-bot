@@ -26,7 +26,7 @@ const MAX_CANDLES_PER_REQUEST = 5000; // OANDA hard limit
 const REQUEST_DELAY_MS = 250;
 const OUTPUT_PATH = join('data', 'dax_1m.csv');
 
-interface CliArgs {
+export interface CliArgs {
   token: string;
   instrument: string;
   from: Date;
@@ -34,8 +34,21 @@ interface CliArgs {
   baseUrl: string;
 }
 
-function parseArgs(): CliArgs {
-  const argv = process.argv.slice(2);
+export class MissingTokenError extends Error {
+  constructor() {
+    super('--token is required');
+    this.name = 'MissingTokenError';
+  }
+}
+
+/**
+ * Parse the argument vector (without `node` and the script path).
+ *
+ * Takes argv rather than reading `process.argv`, and throws rather than
+ * calling `process.exit`, so the defaulting rules below are reachable from a
+ * test. Turning a missing token into an exit code is `main`'s job.
+ */
+export function parseArgs(argv: readonly string[], now: Date = new Date()): CliArgs {
   let token = '';
   let instrument = DEFAULT_INSTRUMENT;
   let fromStr = '';
@@ -52,23 +65,20 @@ function parseArgs(): CliArgs {
   }
 
   if (!token) {
-    console.error('Error: --token is required.');
-    console.error('');
-    console.error('Steps:');
-    console.error('  1. Sign up for free at https://www.oanda.com/register/#/sign-up/demo');
-    console.error('  2. Log in → My Account → Manage API Access → Generate token');
-    console.error('  3. Re-run: npm run download-ger40 -- --token YOUR_TOKEN');
-    process.exit(1);
+    throw new MissingTokenError();
   }
 
   const to = toStr
     ? new Date(toStr + 'T00:00:00Z')
     : (() => {
-        const d = new Date();
+        const d = new Date(now);
         d.setUTCHours(0, 0, 0, 0);
         return d;
       })();
 
+  // Default span is the two years ending at `to`, not at today: with an
+  // explicit --to and no --from, anchoring on today would silently widen the
+  // requested window.
   const from = fromStr
     ? new Date(fromStr + 'T00:00:00Z')
     : (() => {
@@ -82,7 +92,17 @@ function parseArgs(): CliArgs {
   return { token, instrument, from, to, baseUrl };
 }
 
-interface OandaCandle {
+function reportMissingToken(): never {
+  console.error('Error: --token is required.');
+  console.error('');
+  console.error('Steps:');
+  console.error('  1. Sign up for free at https://www.oanda.com/register/#/sign-up/demo');
+  console.error('  2. Log in → My Account → Manage API Access → Generate token');
+  console.error('  3. Re-run: npm run download-ger40 -- --token YOUR_TOKEN');
+  process.exit(1);
+}
+
+export interface OandaCandle {
   time: string;
   mid: { o: string; h: string; l: string; c: string };
   volume: number;
@@ -121,7 +141,7 @@ function pad(n: number): string {
   return String(n).padStart(2, '0');
 }
 
-function toMt5Row(c: OandaCandle): string {
+export function toMt5Row(c: OandaCandle): string {
   const d = new Date(c.time);
   const date = `${d.getUTCFullYear()}.${pad(d.getUTCMonth() + 1)}.${pad(d.getUTCDate())}`;
   const time = `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:00`;
@@ -133,7 +153,17 @@ function toMt5Row(c: OandaCandle): string {
 }
 
 async function main(): Promise<void> {
-  const { token, instrument, from, to, baseUrl } = parseArgs();
+  let args: CliArgs;
+  try {
+    args = parseArgs(process.argv.slice(2));
+  } catch (error) {
+    if (error instanceof MissingTokenError) {
+      reportMissingToken();
+    }
+    throw error;
+  }
+
+  const { token, instrument, from, to, baseUrl } = args;
   const env = baseUrl.includes('practice') ? 'practice' : 'live';
 
   console.log(`Downloading ${instrument} M1 from OANDA (${env})`);
@@ -194,7 +224,11 @@ async function main(): Promise<void> {
   console.log('  npm run cli -- backtest:frankfurt --tz UTC');
 }
 
-main().catch((err: unknown) => {
-  console.error(err);
-  process.exit(1);
-});
+// Only run when invoked as a script, so importing this module from a test
+// does not start a download.
+if (require.main === module) {
+  main().catch((err: unknown) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

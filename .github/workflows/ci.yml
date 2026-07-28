@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [master, migrate-to-nestjs]
+  pull_request:
+  workflow_dispatch:
+
+# A newer push to the same branch makes the running job pointless.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: format, lint, typecheck, test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Matches the `engines.node` floor in package.json.
+          node-version: 22
+          cache: npm
+
+      # `npm ci` installs from the lockfile only and fails if package.json and
+      # package-lock.json disagree — which is the check we want, rather than
+      # `npm install` quietly reconciling them.
+      #
+      # This also builds lzma-native from source (it ships an install script).
+      # Nothing under test imports it, but `scripts/download-dax-dukascopy.ts`
+      # does, so the typecheck needs its types present.
+      - name: Install
+        run: npm ci
+
+      - name: Verify
+        run: npm run verify
+
+      - name: Coverage
+        run: npm run test:cov
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage
+          path: coverage/
+          retention-days: 14
+
+  golden:
+    name: golden fixtures are reproducible
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # Not a preference. sum() switched to compensated summation in 3.12,
+          # which moves the last bits of profit_factor and total_pnl_pct, and
+          # the parity suites compare exactly. The exporter refuses to run on
+          # anything else; this pins the runner to match.
+          python-version: '3.11'
+
+      # Catches a hand-edited fixture: the reports are derived from the golden
+      # trade lists, so regenerating them must be a no-op.
+      - name: Regenerate golden reports
+        run: python tools/export-golden/export_reports.py
+
+      - name: Fail if regeneration changed anything
+        run: git diff --exit-code -- test/fixtures/golden/reports/
