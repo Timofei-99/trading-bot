@@ -1,7 +1,7 @@
 import { Command, CommandRunner, Option } from 'nest-commander';
 
 import { BacktestRunnerService } from '@bot/app/backtest-runner.service';
-import { formatBacktestReport } from './report-format';
+import { printReport } from './backtest-output';
 
 interface H1m3mOptions {
   ticker?: string;
@@ -51,18 +51,8 @@ export class BacktestH1m3mCommand extends CommandRunner {
     });
 
     console.log(`\nRunning backtest on 5m bars (${outcome.barsByTimeframe['5m']} bars) …`);
-    console.log(
-      formatBacktestReport(
-        {
-          symbol: ticker,
-          strategyName: outcome.strategy.name,
-          strategyVersion: outcome.strategy.version,
-          initialBalance: balance,
-          fromMs: startMs,
-          toMs: endMs,
-        },
-        outcome.report,
-      ),
+    printReport(outcome, { symbol: ticker, initialBalance: balance, baseTimeframe: '5m' }, (line) =>
+      console.log(line),
     );
   }
 

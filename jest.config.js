@@ -51,6 +51,10 @@ module.exports = {
     './packages/core/src/detectors/': { statements: 98, branches: 95, functions: 92, lines: 98 },
     './packages/core/src/engine/': { statements: 86, branches: 77, functions: 76, lines: 86 },
     './packages/core/src/execution/': { statements: 95, branches: 85, functions: 100, lines: 95 },
+    // Low, and locked in at that. The commands are still mostly untested; this
+    // floor exists so the little that is covered cannot quietly go away while
+    // the rest is being worked through.
+    './apps/cli/src/': { statements: 13, branches: 8, functions: 18, lines: 13 },
   },
   // Parity specs replay a year of bars through the engine; the default 5s
   // timeout is not enough for those.

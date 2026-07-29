@@ -4,6 +4,7 @@ import { join } from 'node:path';
 
 import { BacktestRunnerService } from './backtest-runner.service';
 import { CandleSourceService } from './candle-source.service';
+import { AppConfigService } from './config.service';
 import { ReportService } from './report.service';
 import { RunRegistryService } from './run-registry.service';
 import {
@@ -34,14 +35,32 @@ export function resolveStrategyDescriptors(dir = join(process.cwd(), 'config', '
 
 @Module({
   providers: [
+    // Built by factory, not by class: the constructor takes an optional
+    // AppConfig for tests, and an interface is not something the container can
+    // resolve.
+    { provide: AppConfigService, useFactory: () => new AppConfigService() },
     { provide: STRATEGY_DESCRIPTORS, useFactory: () => resolveStrategyDescriptors() },
-    { provide: CandleSourceService, useFactory: () => new CandleSourceService() },
-    { provide: ReportService, useFactory: () => new ReportService() },
+    // Both services take constructor options that used to be hardcoded by a
+    // `useFactory: () => new X()`, which is a provider that cannot be
+    // configured — the container was carrying them without deciding anything.
+    // Now the cache directory comes from config/default.yaml (or
+    // DATA_CACHE_DIR) like everything else.
+    {
+      provide: CandleSourceService,
+      inject: [AppConfigService],
+      useFactory: (config: AppConfigService) =>
+        new CandleSourceService({ cacheDir: config.data.cacheDir }),
+    },
+    {
+      provide: ReportService,
+      useFactory: () => new ReportService(),
+    },
     StrategyRegistryService,
     BacktestRunnerService,
     RunRegistryService,
   ],
   exports: [
+    AppConfigService,
     StrategyRegistryService,
     BacktestRunnerService,
     RunRegistryService,

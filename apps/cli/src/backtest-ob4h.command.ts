@@ -1,8 +1,8 @@
+import { BacktestRunnerService } from '@bot/app/backtest-runner.service';
 import { Command, CommandRunner, Option } from 'nest-commander';
 
-import { BacktestRunnerService } from '@bot/app/backtest-runner.service';
+import { printBarCounts, printCosts, printReport } from './backtest-output';
 import { assertRange, parseInstant } from './parse-time';
-import { formatBacktestReport } from './report-format';
 
 interface Ob4hOptions {
   symbol?: string;
@@ -17,7 +17,13 @@ interface Ob4hOptions {
   maxDailyDd?: number;
 }
 
-/** Replaces `run_backtest.py` and `_run_2025.py`. */
+/**
+ * Replaces `run_backtest.py` and `_run_2025.py`.
+ *
+ * A fixed preset over the same path `backtest --strategy OB_4h_FVG_15m` takes:
+ * Binance, 4h context, 15m base. It exists so the common case is one word, not
+ * because it does anything the generic command cannot.
+ */
 @Command({
   name: 'backtest:ob4h',
   description: 'Backtest OB_4h_FVG_15m on crypto (Binance, cache-first)',
@@ -33,11 +39,13 @@ export class BacktestOb4hCommand extends CommandRunner {
     const endMs = parseInstant(options.end ?? '2024-01-01', '--end');
     assertRange(startMs, endMs);
     const balance = options.balance ?? 10_000;
+    const log = (line: string) => console.log(line);
 
-    console.log(
+    log(
       `Loading ${symbol} data ${new Date(startMs).toISOString().slice(0, 10)} → ` +
         `${new Date(endMs).toISOString().slice(0, 10)} …`,
     );
+    printCosts(options, log);
 
     const outcome = await this.runner.run({
       strategy: 'OB_4h_FVG_15m',
@@ -53,37 +61,8 @@ export class BacktestOb4hCommand extends CommandRunner {
       },
     });
 
-    if (options.fee || options.slippage || options.worstCase) {
-      console.log(
-        `  costs: fee=${options.fee ?? 0} per side, slippage=${options.slippage ?? 0}` +
-          `${options.worstCase ? ', worst-case bar resolution' : ''}`,
-      );
-    }
-
-    for (const [timeframe, count] of Object.entries(outcome.barsByTimeframe)) {
-      const span = BacktestRunnerService.span(outcome.context.candles(timeframe));
-      const range =
-        span === null
-          ? ''
-          : `  (${new Date(span.fromMs).toISOString().slice(0, 10)} – ${new Date(span.toMs)
-              .toISOString()
-              .slice(0, 10)})`;
-      console.log(`  ${timeframe}: ${count} bars${range}`);
-    }
-
-    console.log(
-      formatBacktestReport(
-        {
-          symbol,
-          strategyName: outcome.strategy.name,
-          strategyVersion: outcome.strategy.version,
-          initialBalance: balance,
-          fromMs: startMs,
-          toMs: endMs,
-        },
-        outcome.report,
-      ),
-    );
+    printBarCounts(outcome, log);
+    printReport(outcome, { symbol, initialBalance: balance, baseTimeframe: '15m' }, log);
   }
 
   @Option({ flags: '--symbol <symbol>', description: 'Trading pair (default BTC/USDT)' })

@@ -2,8 +2,8 @@ import { Command, CommandRunner, Option } from 'nest-commander';
 
 import { BacktestRunnerService } from '@bot/app/backtest-runner.service';
 import { StrategyRegistryService } from '@bot/app/strategy-registry.service';
+import { printBarCounts, printCosts, printReport, printTrades } from './backtest-output';
 import { assertRange, parseInstant } from './parse-time';
-import { formatBacktestReport } from './report-format';
 
 interface BacktestOptions {
   strategy?: string;
@@ -79,13 +79,7 @@ export class BacktestCommand extends CommandRunner {
 
     console.log(`strategy : ${descriptor.id} v${descriptor.version}`);
     console.log(`data     : ${source} ${symbol} [${timeframes.join(', ')}], base ${baseTimeframe}`);
-    console.log(
-      `costs    : fee ${options.fee ?? 0} per side, slippage ${options.slippage ?? 0}` +
-        `${options.worstCase === true ? ', worst-case bars' : ''}`,
-    );
-    if (options.fee === undefined) {
-      console.log('           ⚠ no fee set — this result is GROSS, not tradeable');
-    }
+    printCosts(options, (line) => console.log(line));
 
     const outcome = await this.runner.run({
       strategy: descriptor.id,
@@ -110,46 +104,13 @@ export class BacktestCommand extends CommandRunner {
       },
     });
 
-    for (const [timeframe, count] of Object.entries(outcome.barsByTimeframe)) {
-      const span = BacktestRunnerService.span(outcome.context.candles(timeframe));
-      console.log(
-        `  ${timeframe}: ${count} bars` +
-          (span === null
-            ? ''
-            : `  (${new Date(span.fromMs).toISOString().slice(0, 10)} – ${new Date(span.toMs)
-                .toISOString()
-                .slice(0, 10)})`),
-      );
-    }
-
-    const span = BacktestRunnerService.span(outcome.context.candles(baseTimeframe));
-    console.log(
-      formatBacktestReport(
-        {
-          symbol,
-          strategyName: outcome.strategy.name,
-          strategyVersion: outcome.strategy.version,
-          initialBalance: balance,
-          fromMs: span?.fromMs ?? null,
-          toMs: span?.toMs ?? null,
-        },
-        outcome.report,
-      ),
+    printBarCounts(outcome, (line) => console.log(line));
+    printReport(outcome, { symbol, initialBalance: balance, baseTimeframe }, (line) =>
+      console.log(line),
     );
 
     if (options.trades === true) {
-      console.log('\n=== Trades ===');
-      for (const [i, trade] of outcome.trades.entries()) {
-        const pnl = ((trade.pnlPct ?? 0) * 100).toFixed(2);
-        console.log(
-          `  ${String(i + 1).padStart(3)}  ${new Date(trade.entryTime).toISOString()}  ` +
-            `${trade.signal.direction.padEnd(5)} @ ${trade.entryPrice}  → ` +
-            `${(trade.exitReason ?? 'open').padEnd(6)} @ ${trade.exitPrice ?? '—'}  ${pnl.padStart(7)}%`,
-        );
-      }
-      if (outcome.openTrades.length > 0) {
-        console.log(`  (+${outcome.openTrades.length} still open at the end of the range)`);
-      }
+      printTrades(outcome, (line) => console.log(line));
     }
   }
 
