@@ -67,6 +67,38 @@ layer is not allowed, a barrel added without an `exports` entry. Both stay
 silent until a built artefact fails at runtime, which is the worst place to
 learn about it.
 
+Alongside it, `test/workspace/gitignore.spec.ts` checks the ignore rules
+against the index in both directions. This repository has been bitten each
+way: an unanchored `reports/` rule silently swallowed the golden backtest
+reports, and a runtime journal sat in the index despite its directory being
+ignored. Neither surfaced as a failure at the time.
+
+## Complexity
+
+`max-depth` (4) and `complexity` (15) are enforced in eslint, with a named
+exemption list rather than a weaker global number — see the config for what is
+on it and why. `max-depth` measures real nesting and is the one to trust;
+`complexity` is cyclomatic and counts every `??`, so option-defaulting code
+scores high without being hard to read.
+
+Line count is deliberately *not* enforced. Four files sit above 300 lines
+(`bybit.adapter`, `h1-3m-classic`, `live.engine`, `paper.adapter`) and what
+remains in each is cohesive — an order lifecycle, a strategy, a loop, a fill
+model. Splitting further would be cutting to hit a number.
+
+## Restore is a fold, not a mode
+
+Both execution adapters rebuild their state from the journal through a pure
+function — `replayJournal` for the venue, `replayPaperJournal` for paper.
+Neither has a "replaying" flag, and that is the point: the earlier design
+mutated the adapter while a flag suppressed writes back to the journal, which
+works until someone adds a state-changing method without knowing the flag
+exists. A fold has nothing to write to, so there is nothing to forget.
+
+The engine's own restore (`LiveEngine.restoreFromJournal`) is separate and
+reads different events — `halted`, `resumed`, `bar_processed`. The adapters
+ignore those; the engine ignores the order events.
+
 ## Resolution: three contexts, three mechanisms
 
 The same specifier `@bot/core/domain/signal` is resolved three different ways,
