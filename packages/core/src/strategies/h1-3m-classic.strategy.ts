@@ -48,6 +48,27 @@ const utcDateKey = (timeMs: number): string =>
  * Shared by the context check and the sweep detector, which is why it lives
  * outside the class — the same arrangement the Python module used.
  */
+/**
+ * Which side swept most recently — the order-flow half of the daily bias.
+ *
+ * A `null` means that kind of sweep has not happened at all today, which is
+ * why it reads as "infinitely long ago" rather than as zero: a bull sweep at
+ * epoch 0 would otherwise lose to a bear sweep that never occurred.
+ *
+ * With no sweeps on either side there is nothing to read, so the caller's own
+ * directional drift stands.
+ */
+export function orderFlowIsBullish(
+  lastBullSweep: number | null,
+  lastBearSweep: number | null,
+  directionUp: boolean,
+): boolean {
+  if (lastBullSweep === null && lastBearSweep === null) {
+    return directionUp;
+  }
+  return (lastBullSweep ?? -Infinity) > (lastBearSweep ?? -Infinity);
+}
+
 function rawFractals(candles: CandleSeries): RawFractal[] {
   const { high, low, time } = candles;
   const out: RawFractal[] = [];
@@ -262,16 +283,7 @@ export class H1m3mClassicStrategy extends Strategy {
       }
     }
 
-    let orderFlowBullish: boolean;
-    if (lastBullSweep === null && lastBearSweep === null) {
-      orderFlowBullish = directionUp; // no sweep data: trust the drift
-    } else if (lastBearSweep === null) {
-      orderFlowBullish = true;
-    } else if (lastBullSweep === null) {
-      orderFlowBullish = false;
-    } else {
-      orderFlowBullish = lastBullSweep > lastBearSweep;
-    }
+    const orderFlowBullish = orderFlowIsBullish(lastBullSweep, lastBearSweep, directionUp);
 
     if (directionUp && orderFlowBullish) {
       return 'BULLISH';

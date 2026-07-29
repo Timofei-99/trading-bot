@@ -5,6 +5,7 @@ import { SyncResult, TradeJournalPort } from '../domain/order';
 import { LiveExecutionPort, MarketDataPort, Strategy } from '../domain/ports';
 import { RiskManager } from '../domain/risk-manager';
 import { Signal } from '../domain/signal';
+import { Trade } from '../domain/trade';
 
 /** Injectable time source, so the loop is testable without a wall clock. */
 export interface Clock {
@@ -187,41 +188,12 @@ export class LiveEngine {
     const syncResult = await this.settle(base.candleAt(base.length - 1));
     const closedTrades = caughtUp + syncResult.closed.length;
 
-    // The same containment rule as the backtest engine: every timeframe is
-    // cut at the current bar's timestamp.
-    const context = new MarketContext(this.symbol, [...this.timeframes], this.window);
-    for (const timeframe of this.timeframes) {
-      const visible = (this.series.get(timeframe) as CandleSeries).visibleAt(currentTime);
-      if (!visible.isEmpty) {
-        context.load(timeframe, visible);
-      }
-    }
+    const context = this.contextAt(currentTime);
 
     // Evaluate the account-level stop against what just closed, before
     // considering any new entry.
     const halted = await this.enforceKillSwitch(currentTime);
-
-    let placedEntry = false;
-    const position = await this.adapter.getPosition(this.symbol);
-    if (position !== null) {
-      if (this.strategy.checkExit(context, position)) {
-        await this.adapter.closePosition(this.symbol, 'strategy');
-        this.log('strategy exit: position closed');
-      }
-    } else if (
-      this.killSwitch?.isHalted !== true &&
-      (await this.adapter.getRestingEntry(this.symbol)) === null
-    ) {
-      const signal = this.strategy.checkEntry(context);
-      if (signal !== null && (await this.riskAllows(signal, currentTime))) {
-        const order = await this.adapter.placeEntry(signal);
-        placedEntry = true;
-        this.log(
-          `entry placed: ${signal.direction} ${signal.symbol} @ ${signal.entry} ` +
-            `(sl ${signal.stopLoss}, tp ${signal.takeProfit}, size ${order.positionSize.toFixed(8)})`,
-        );
-      }
-    }
+    const placedEntry = await this.consultStrategy(context, currentTime);
 
     // Written LAST, and only on a tick that ran to completion. A crash before
     // this point leaves the bar unrecorded, so the restart settles it again —
@@ -241,6 +213,69 @@ export class LiveEngine {
       closedTrades,
       ...(halted === null ? {} : { halted }),
     };
+  }
+
+  /**
+   * The view the strategy gets: every timeframe cut at the current bar's
+   * timestamp, exactly as the backtest engine cuts it.
+   */
+  private contextAt(currentTime: number): MarketContext {
+    const context = new MarketContext(this.symbol, [...this.timeframes], this.window);
+    for (const timeframe of this.timeframes) {
+      const visible = (this.series.get(timeframe) as CandleSeries).visibleAt(currentTime);
+      if (!visible.isEmpty) {
+        context.load(timeframe, visible);
+      }
+    }
+    return context;
+  }
+
+  /**
+   * Give the strategy its one say on this bar. Returns whether an entry was
+   * placed.
+   *
+   * There are exactly two things it can be asked, and which one depends only
+   * on whether a position is open — so the checks read top to bottom as the
+   * reasons NOT to place an entry, each returning early, rather than as one
+   * condition assembled out of four clauses.
+   */
+  private async consultStrategy(context: MarketContext, nowMs: number): Promise<boolean> {
+    const position = await this.adapter.getPosition(this.symbol);
+    if (position !== null) {
+      await this.considerExit(context, position);
+      return false;
+    }
+    if (this.killSwitch?.isHalted === true) {
+      return false;
+    }
+    // An entry already resting is this bar's decision, already taken.
+    if ((await this.adapter.getRestingEntry(this.symbol)) !== null) {
+      return false;
+    }
+
+    const signal = this.strategy.checkEntry(context);
+    if (signal === null) {
+      return false;
+    }
+    if (!(await this.riskAllows(signal, nowMs))) {
+      return false;
+    }
+
+    const order = await this.adapter.placeEntry(signal);
+    this.log(
+      `entry placed: ${signal.direction} ${signal.symbol} @ ${signal.entry} ` +
+        `(sl ${signal.stopLoss}, tp ${signal.takeProfit}, size ${order.positionSize.toFixed(8)})`,
+    );
+    return true;
+  }
+
+  /** The strategy's optional early exit, on top of the venue's TP and SL. */
+  private async considerExit(context: MarketContext, position: Trade): Promise<void> {
+    if (!this.strategy.checkExit(context, position)) {
+      return;
+    }
+    await this.adapter.closePosition(this.symbol, 'strategy');
+    this.log('strategy exit: position closed');
   }
 
   /**

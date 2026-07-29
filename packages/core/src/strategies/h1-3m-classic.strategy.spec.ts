@@ -3,7 +3,11 @@ import { MarketContext } from '../domain/market-context';
 import { Signal } from '../domain/signal';
 import { BacktestEngine } from '../engine/backtest.engine';
 import { BacktestAdapter } from '../execution/backtest.adapter';
-import { H1m3mClassicOptions, H1m3mClassicStrategy } from './h1-3m-classic.strategy';
+import {
+  H1m3mClassicOptions,
+  H1m3mClassicStrategy,
+  orderFlowIsBullish,
+} from './h1-3m-classic.strategy';
 
 /**
  * The Python implementation shipped without tests for this strategy — it was
@@ -112,5 +116,33 @@ describe('H1m3mClassicStrategy', () => {
     const context = new MarketContext('EURUSD=X', ['1h', '5m'], 60_000);
     context.load('5m', loadGoldenCandles('eurusd_5m').head(10));
     expect(new H1m3mClassicStrategy().checkEntry(context)).toBeNull();
+  });
+});
+
+describe('orderFlowIsBullish', () => {
+  it('falls back to the directional drift when neither side has swept', () => {
+    expect(orderFlowIsBullish(null, null, true)).toBe(true);
+    expect(orderFlowIsBullish(null, null, false)).toBe(false);
+  });
+
+  it('reads a side that has never swept as infinitely long ago', () => {
+    // Not as zero: a bull sweep at epoch 0 must still beat a bear sweep that
+    // never happened.
+    expect(orderFlowIsBullish(0, null, false)).toBe(true);
+    expect(orderFlowIsBullish(null, 0, true)).toBe(false);
+  });
+
+  it('takes whichever side swept more recently', () => {
+    expect(orderFlowIsBullish(200, 100, false)).toBe(true);
+    expect(orderFlowIsBullish(100, 200, true)).toBe(false);
+  });
+
+  it('is not bullish when both swept on the same bar', () => {
+    // A tie is not evidence of a bull, and the drift has already had its say.
+    expect(orderFlowIsBullish(100, 100, true)).toBe(false);
+  });
+
+  it('ignores the drift entirely once there is any sweep to read', () => {
+    expect(orderFlowIsBullish(200, 100, false)).toBe(orderFlowIsBullish(200, 100, true));
   });
 });

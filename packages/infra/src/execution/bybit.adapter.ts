@@ -12,6 +12,8 @@ import { LiveExecutionPort } from '@bot/core/domain/ports';
 import { Direction, Signal } from '@bot/core/domain/signal';
 import { ExitReason, Trade } from '@bot/core/domain/trade';
 import { ExchangeClient, MarketSpec } from './exchange-client';
+import { withRetry } from './retry';
+import { assertTradeable, quoteCurrency } from './venue-limits';
 
 export interface BybitAdapterOptions {
   readonly symbol: string;
@@ -84,7 +86,7 @@ export class BybitAdapter implements LiveExecutionPort {
     this.riskPerTrade = options.riskPerTrade ?? 0.01;
     this.feeRate = options.feeRate ?? 0.001;
     this.entryTimeoutMs = options.entryTimeoutMs ?? 60 * 60_000;
-    this.quoteCurrency = options.quoteCurrency ?? deriveQuote(options.symbol);
+    this.quoteCurrency = options.quoteCurrency ?? quoteCurrency(options.symbol);
     this.journal = options.journal;
     this.log = options.log ?? (() => undefined);
     this.maxRetries = options.maxRetries ?? 3;
@@ -227,7 +229,7 @@ export class BybitAdapter implements LiveExecutionPort {
     const affordable = free / (entry * (1 + this.feeRate));
     const amount = this.client.amountToPrecision(this.symbol, Math.min(risked, affordable));
 
-    this.assertTradeable(market, amount, entry);
+    assertTradeable(market, this.symbol, amount, entry);
 
     const orderId = entryOrderId(signal);
     const order: EntryOrder = {
@@ -449,24 +451,6 @@ export class BybitAdapter implements LiveExecutionPort {
 
   // -------------------------------------------------------------------------
 
-  private assertTradeable(market: MarketSpec, amount: number, price: number): void {
-    if (!(amount > 0)) {
-      throw new Error(
-        `Position size rounds to ${amount}: balance too small for this stop distance`,
-      );
-    }
-    if (market.minAmount !== null && amount < market.minAmount) {
-      throw new Error(
-        `Position size ${amount} is below the venue minimum ${market.minAmount} for ${this.symbol}`,
-      );
-    }
-    if (market.minNotional !== null && amount * price < market.minNotional) {
-      throw new Error(
-        `Order notional ${(amount * price).toFixed(2)} is below the venue minimum ${market.minNotional}`,
-      );
-    }
-  }
-
   private requireMarket(): MarketSpec {
     if (this.market === null) {
       throw new Error('BybitAdapter.start() must run before placing orders');
@@ -525,31 +509,14 @@ export class BybitAdapter implements LiveExecutionPort {
     return trade;
   }
 
-  /**
-   * Retry a call that is safe to repeat.
-   *
-   * Every mutating call routed through here carries an `orderLinkId`, so a
-   * repeat after a lost reply is deduplicated by the venue rather than
-   * doubling a position.
-   */
-  private async retry<T>(label: string, call: () => Promise<T>): Promise<T> {
-    let lastError: unknown;
-    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
-      try {
-        return await call();
-      } catch (error) {
-        lastError = error;
-        if (attempt === this.maxRetries) {
-          break;
-        }
-        const delay = this.retryBaseMs * 2 ** attempt;
-        this.log(`${label} failed (${(error as Error).message}); retry in ${delay} ms`);
-        await this.sleep(delay);
-      }
-    }
-    throw new Error(
-      `${label} failed after ${this.maxRetries + 1} attempts: ${(lastError as Error).message}`,
-    );
+  /** Delegates to `withRetry`; see its contract for what "safe to repeat" means. */
+  private retry<T>(label: string, call: () => Promise<T>): Promise<T> {
+    return withRetry(label, call, {
+      maxRetries: this.maxRetries,
+      baseMs: this.retryBaseMs,
+      sleep: this.sleep,
+      log: this.log,
+    });
   }
 
   private record(event: JournalEvent): void {
@@ -627,13 +594,4 @@ export class BybitAdapter implements LiveExecutionPort {
       feeRate: this.feeRate,
     });
   }
-}
-
-/** `BTC/USDT` -> `USDT`. */
-function deriveQuote(symbol: string): string {
-  const parts = symbol.split('/');
-  if (parts.length !== 2 || parts[1] === '') {
-    throw new Error(`Cannot derive the quote currency from ${JSON.stringify(symbol)}`);
-  }
-  return parts[1].split(':')[0];
 }

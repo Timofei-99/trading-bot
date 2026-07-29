@@ -58,7 +58,7 @@ module.exports = {
     // The layer that actually talks to the venue. Was 0% on both clients
     // before the restart-safety work; holding the line matters more here than
     // anywhere except the domain.
-    './packages/infra/src/execution/': { statements: 89, branches: 76, functions: 94, lines: 89 },
+    './packages/infra/src/execution/': { statements: 90, branches: 78, functions: 94, lines: 91 },
   },
   // Parity specs replay a year of bars through the engine; the default 5s
   // timeout is not enough for those.
