@@ -1,7 +1,7 @@
-import { CandleSeries } from '../domain/candle-series';
+import { Candle, CandleSeries } from '../domain/candle-series';
 import { dailyRealizedPnl, KillSwitch } from '../domain/kill-switch';
 import { MarketContext, TIMEFRAME_MINUTES } from '../domain/market-context';
-import { TradeJournalPort } from '../domain/order';
+import { SyncResult, TradeJournalPort } from '../domain/order';
 import { LiveExecutionPort, MarketDataPort, Strategy } from '../domain/ports';
 import { RiskManager } from '../domain/risk-manager';
 import { Signal } from '../domain/signal';
@@ -95,19 +95,7 @@ export class LiveEngine {
     this.clock = options.clock ?? SYSTEM_CLOCK;
     this.log = options.log ?? (() => undefined);
 
-    // A halt recorded before the process died must still be in force.
-    if (this.killSwitch !== undefined && this.journal !== undefined) {
-      for (const event of this.journal.readAll()) {
-        if (event.type === 'halted') {
-          this.killSwitch.halt(event.reason);
-        } else if (event.type === 'resumed') {
-          this.killSwitch.resume();
-        }
-      }
-      if (this.killSwitch.isHalted) {
-        this.log(`HALTED (restored): ${this.killSwitch.reason}`);
-      }
-    }
+    this.restoreFromJournal();
 
     for (const timeframe of this.timeframes) {
       this.timeframeMs(timeframe); // validate configuration up front
@@ -115,6 +103,36 @@ export class LiveEngine {
   }
 
   // -------------------------------------------------------------------------
+
+  /**
+   * Rebuild everything the previous process knew: whether it was halted, and
+   * which bar it last ran to completion.
+   *
+   * One pass over the journal in order, because both facts are last-write-wins
+   * and a second pass would only be a second chance to disagree.
+   */
+  private restoreFromJournal(): void {
+    if (this.journal === undefined) {
+      return;
+    }
+
+    for (const event of this.journal.readAll()) {
+      if (event.type === 'halted') {
+        this.killSwitch?.halt(event.reason);
+      } else if (event.type === 'resumed') {
+        this.killSwitch?.resume();
+      } else if (event.type === 'bar_processed' && event.symbol === this.symbol) {
+        this.lastProcessed = event.barTime;
+      }
+    }
+
+    if (this.killSwitch?.isHalted === true) {
+      this.log(`HALTED (restored): ${this.killSwitch.reason}`);
+    }
+    if (this.lastProcessed !== null) {
+      this.log(`restored: last processed bar ${new Date(this.lastProcessed).toISOString()}`);
+    }
+  }
 
   /** Preload enough closed history for every timeframe's rolling window. */
   async warmup(nowMs: number): Promise<void> {
@@ -133,8 +151,15 @@ export class LiveEngine {
           (closed.lastTime === null ? '' : `, last ${new Date(closed.lastTime).toISOString()}`),
       );
     }
-    const base = this.series.get(this.baseTimeframe);
-    this.lastProcessed = base?.lastTime ?? null;
+    // A FIRST start must not act on bars that closed before the process
+    // existed, so it marks the newest one as already handled. A RESTART must
+    // not do that: the journal already says where it got to, and overwriting
+    // that here is exactly how settlement of a bar that closed during the
+    // outage went missing.
+    if (this.lastProcessed === null) {
+      const base = this.series.get(this.baseTimeframe);
+      this.lastProcessed = base?.lastTime ?? null;
+    }
   }
 
   /** One full iteration; the heart of the loop, called by `start()` and by tests. */
@@ -150,6 +175,18 @@ export class LiveEngine {
       return { processedBar: null, placedEntry: false, closedTrades: 0 };
     }
 
+    // Settle every bar that closed since the last completed tick, not just the
+    // newest one. Normally that is exactly one bar; after a restart or a
+    // stalled loop it is however many were missed, and skipping them would
+    // lose a take-profit or a stop that traded during the gap.
+    //
+    // Only settlement is replayed. The strategy's ENTRY decision runs once, on
+    // the newest bar, because acting on a signal from a bar that closed
+    // minutes ago is not the same trade the strategy meant to take.
+    const caughtUp = await this.settleMissedBars(base, currentTime);
+    const syncResult = await this.settle(base.candleAt(base.length - 1));
+    const closedTrades = caughtUp + syncResult.closed.length;
+
     // The same containment rule as the backtest engine: every timeframe is
     // cut at the current bar's timestamp.
     const context = new MarketContext(this.symbol, [...this.timeframes], this.window);
@@ -157,22 +194,6 @@ export class LiveEngine {
       const visible = (this.series.get(timeframe) as CandleSeries).visibleAt(currentTime);
       if (!visible.isEmpty) {
         context.load(timeframe, visible);
-      }
-    }
-
-    const lastBar = base.candleAt(base.length - 1);
-    const syncResult = await this.adapter.sync({ symbol: this.symbol, candle: lastBar });
-    for (const trade of syncResult.closed) {
-      this.log(
-        `closed ${trade.exitReason} @ ${trade.exitPrice} ` +
-          `(pnl ${((trade.pnlPct ?? 0) * 100).toFixed(3)}%)`,
-      );
-    }
-    for (const order of syncResult.settledEntries) {
-      if (order.status !== 'filled') {
-        this.log(`entry ${order.status}: ${order.orderId}`);
-      } else {
-        this.log(`entry filled @ ${order.fillPrice}`);
       }
     }
 
@@ -202,13 +223,76 @@ export class LiveEngine {
       }
     }
 
+    // Written LAST, and only on a tick that ran to completion. A crash before
+    // this point leaves the bar unrecorded, so the restart settles it again —
+    // which is safe, because settlement is idempotent and the entry it might
+    // re-place carries the same deterministic id the venue already knows.
     this.lastProcessed = currentTime;
+    this.journal?.append({
+      type: 'bar_processed',
+      at: nowMs,
+      symbol: this.symbol,
+      barTime: currentTime,
+    });
+
     return {
       processedBar: currentTime,
       placedEntry,
-      closedTrades: syncResult.closed.length,
+      closedTrades,
       ...(halted === null ? {} : { halted }),
     };
+  }
+
+  /**
+   * Settle the bars strictly between the last completed tick and the current
+   * one. Returns how many trades closed while catching up.
+   *
+   * Bounded by the rolling window the engine keeps, so an outage of any length
+   * replays at most that many bars rather than the whole history.
+   */
+  private async settleMissedBars(base: CandleSeries, currentTime: number): Promise<number> {
+    if (this.lastProcessed === null) {
+      return 0;
+    }
+
+    const missed: Candle[] = [];
+    for (let i = base.length - 1; i >= 0; i--) {
+      const candle = base.candleAt(i);
+      if (candle.time >= currentTime || candle.time <= this.lastProcessed) {
+        continue;
+      }
+      missed.unshift(candle);
+    }
+    if (missed.length === 0) {
+      return 0;
+    }
+
+    this.log(`catching up: settling ${missed.length} bar(s) missed since the last completed tick`);
+    let closed = 0;
+    for (const candle of missed) {
+      closed += (await this.settle(candle)).closed.length;
+    }
+    return closed;
+  }
+
+  /** Hand one closed bar to the adapter and narrate what it settled. */
+  private async settle(candle: Candle): Promise<SyncResult> {
+    const result = await this.adapter.sync({ symbol: this.symbol, candle });
+
+    for (const trade of result.closed) {
+      this.log(
+        `closed ${trade.exitReason} @ ${trade.exitPrice} ` +
+          `(pnl ${((trade.pnlPct ?? 0) * 100).toFixed(3)}%)`,
+      );
+    }
+    for (const order of result.settledEntries) {
+      this.log(
+        order.status === 'filled'
+          ? `entry filled @ ${order.fillPrice}`
+          : `entry ${order.status}: ${order.orderId}`,
+      );
+    }
+    return result;
   }
 
   /**
@@ -271,6 +355,14 @@ export class LiveEngine {
 
   stop(): void {
     this.running = false;
+  }
+
+  /**
+   * The newest bar this engine ran to completion, restored from the journal on
+   * startup. `null` means it has not finished one yet.
+   */
+  get lastCompletedBar(): number | null {
+    return this.lastProcessed;
   }
 
   /** Observability for logs and tests. */

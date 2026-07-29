@@ -81,6 +81,22 @@ export type JournalEvent =
       fillTime: number | null;
     }
   | {
+      /**
+       * A bar the engine ran to completion: settled, risk-checked, and given
+       * to the strategy. Written LAST in a tick, so its absence means the bar
+       * was not finished.
+       *
+       * Without it, `lastProcessed` lived only in memory and a restart took
+       * the newest closed bar as already handled — silently skipping
+       * settlement of any bar that closed while the process was down, so a
+       * take-profit touched during the outage was never seen.
+       */
+      type: 'bar_processed';
+      at: number;
+      symbol: string;
+      barTime: number;
+    }
+  | {
       type: 'position_closed';
       at: number;
       orderId: string;

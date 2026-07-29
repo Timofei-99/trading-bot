@@ -47,14 +47,18 @@ module.exports = {
   // silent and expensive, a wrong CLI flag is loud and cheap.
   coverageThreshold: {
     global: { statements: 58, branches: 40, functions: 56, lines: 58 },
-    './packages/core/src/domain/': { statements: 97, branches: 90, functions: 94, lines: 97 },
+    './packages/core/src/domain/': { statements: 97, branches: 90, functions: 95, lines: 97 },
     './packages/core/src/detectors/': { statements: 98, branches: 95, functions: 92, lines: 98 },
-    './packages/core/src/engine/': { statements: 86, branches: 77, functions: 76, lines: 86 },
+    './packages/core/src/engine/': { statements: 88, branches: 80, functions: 80, lines: 88 },
     './packages/core/src/execution/': { statements: 95, branches: 85, functions: 100, lines: 95 },
     // Low, and locked in at that. The commands are still mostly untested; this
     // floor exists so the little that is covered cannot quietly go away while
     // the rest is being worked through.
     './apps/cli/src/': { statements: 13, branches: 8, functions: 18, lines: 13 },
+    // The layer that actually talks to the venue. Was 0% on both clients
+    // before the restart-safety work; holding the line matters more here than
+    // anywhere except the domain.
+    './packages/infra/src/execution/': { statements: 89, branches: 76, functions: 94, lines: 89 },
   },
   // Parity specs replay a year of bars through the engine; the default 5s
   // timeout is not enough for those.

@@ -7,6 +7,7 @@ import {
   SyncResult,
   TradeJournalPort,
 } from '@bot/core/domain/order';
+import { entryOrderId, exitOrderId } from '@bot/core/domain/order-id';
 import { LiveExecutionPort } from '@bot/core/domain/ports';
 import { Direction, Signal } from '@bot/core/domain/signal';
 import { ExitReason, Trade } from '@bot/core/domain/trade';
@@ -228,7 +229,7 @@ export class BybitAdapter implements LiveExecutionPort {
 
     this.assertTradeable(market, amount, entry);
 
-    const orderId = globalThis.crypto.randomUUID();
+    const orderId = entryOrderId(signal);
     const order: EntryOrder = {
       orderId,
       signal,
@@ -439,7 +440,7 @@ export class BybitAdapter implements LiveExecutionPort {
         this.symbol,
         'sell',
         trade.positionSize,
-        globalThis.crypto.randomUUID(),
+        exitOrderId(trade.orderId),
       ),
     );
     const price = sold.average ?? sold.price ?? trade.entryPrice;

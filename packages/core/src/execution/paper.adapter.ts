@@ -8,6 +8,7 @@ import {
   SyncResult,
   TradeJournalPort,
 } from '../domain/order';
+import { entryOrderId } from '../domain/order-id';
 import { LiveExecutionPort } from '../domain/ports';
 import { Direction, Signal } from '../domain/signal';
 import { ExitReason, Trade } from '../domain/trade';
@@ -99,7 +100,7 @@ export class PaperAdapter implements LiveExecutionPort {
     }
 
     const order: EntryOrder = {
-      orderId: globalThis.crypto.randomUUID(),
+      orderId: entryOrderId(signal),
       signal,
       positionSize,
       placedAt: signal.timestamp,
