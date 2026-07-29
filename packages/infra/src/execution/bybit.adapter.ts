@@ -1,5 +1,4 @@
 import {
-  deserializeSignal,
   EntryOrder,
   JournalEvent,
   MarketSnapshot,
@@ -12,6 +11,7 @@ import { LiveExecutionPort } from '@bot/core/domain/ports';
 import { Direction, Signal } from '@bot/core/domain/signal';
 import { ExitReason, Trade } from '@bot/core/domain/trade';
 import { ExchangeClient, MarketSpec } from './exchange-client';
+import { OpenState, replayJournal } from './journal-replay';
 import { withRetry } from './retry';
 import { assertTradeable, quoteCurrency } from './venue-limits';
 
@@ -32,12 +32,6 @@ export interface BybitAdapterOptions {
   readonly sleep?: (ms: number) => Promise<void>;
   /** Refuse to start when the local clock is further than this from the venue. */
   readonly maxClockSkewMs?: number;
-}
-
-interface OpenState {
-  readonly order: EntryOrder;
-  /** Venue order id of the resting entry, once known. */
-  exchangeOrderId: string | null;
 }
 
 /**
@@ -76,7 +70,6 @@ export class BybitAdapter implements LiveExecutionPort {
   private position: Trade | null = null;
   private readonly closed: Trade[] = [];
   private cachedBalance = 0;
-  private replaying = false;
 
   constructor(
     private readonly client: ExchangeClient,
@@ -114,11 +107,11 @@ export class BybitAdapter implements LiveExecutionPort {
     this.market = await this.retry('loadMarket', () => this.client.loadMarket(this.symbol));
 
     if (this.journal !== undefined) {
-      this.replaying = true;
-      for (const event of this.journal.readAll()) {
-        this.apply(event);
-      }
-      this.replaying = false;
+      const restored = replayJournal(this.journal.readAll(), this.feeRate);
+      this.resting = restored.resting;
+      this.position = restored.position;
+      this.closed.push(...restored.closed);
+      this.cachedBalance = restored.balance;
     }
 
     await this.reconcile();
@@ -519,79 +512,11 @@ export class BybitAdapter implements LiveExecutionPort {
     });
   }
 
+  /**
+   * Append to the audit trail. No replay guard is needed: restore is a pure
+   * fold in `replayJournal`, so it never reaches this method at all.
+   */
   private record(event: JournalEvent): void {
-    if (!this.replaying && this.journal !== undefined) {
-      this.journal.append(event);
-    }
-  }
-
-  private apply(event: JournalEvent): void {
-    switch (event.type) {
-      case 'session':
-        this.cachedBalance = event.balance;
-        return;
-
-      case 'entry_placed':
-        this.resting = {
-          order: {
-            orderId: event.orderId,
-            signal: deserializeSignal(event.signal),
-            positionSize: event.positionSize,
-            placedAt: event.at,
-            status: 'open',
-            fillPrice: null,
-            fillTime: null,
-          },
-          exchangeOrderId: null,
-        };
-        return;
-
-      case 'entry_acknowledged':
-        if (this.resting !== null && this.resting.order.orderId === event.orderId) {
-          this.resting.exchangeOrderId = event.exchangeOrderId;
-        }
-        return;
-
-      case 'entry_settled': {
-        const state = this.resting;
-        if (state === null) {
-          return;
-        }
-        this.resting = null;
-        if (event.status === 'filled') {
-          this.openPositionSilently(
-            state.order,
-            event.fillPrice as number,
-            event.fillTime as number,
-          );
-        }
-        return;
-      }
-
-      case 'position_closed': {
-        const trade = this.position;
-        if (trade === null) {
-          return;
-        }
-        this.position = null;
-        trade.exitPrice = event.exitPrice;
-        trade.exitTime = event.exitTime;
-        trade.exitReason = event.exitReason as ExitReason;
-        this.closed.push(trade);
-        this.cachedBalance = event.balance;
-        return;
-      }
-    }
-  }
-
-  private openPositionSilently(order: EntryOrder, fillPrice: number, fillTime: number): void {
-    this.position = new Trade({
-      signal: order.signal,
-      orderId: order.orderId,
-      entryTime: fillTime,
-      entryPrice: fillPrice,
-      positionSize: order.positionSize,
-      feeRate: this.feeRate,
-    });
+    this.journal?.append(event);
   }
 }

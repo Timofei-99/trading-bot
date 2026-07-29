@@ -1,6 +1,5 @@
 import { Candle } from '../domain/candle-series';
 import {
-  deserializeSignal,
   EntryOrder,
   JournalEvent,
   MarketSnapshot,
@@ -10,6 +9,7 @@ import {
 } from '../domain/order';
 import { entryOrderId } from '../domain/order-id';
 import { LiveExecutionPort } from '../domain/ports';
+import { replayPaperJournal } from './paper-replay';
 import { Direction, Signal } from '../domain/signal';
 import { ExitReason, Trade } from '../domain/trade';
 
@@ -57,7 +57,6 @@ export class PaperAdapter implements LiveExecutionPort {
   private readonly openPositions = new Map<string, Trade>();
   private readonly closedTrades: Trade[] = [];
   private readonly lastSeen = new Map<string, { close: number; time: number }>();
-  private replaying = false;
 
   constructor(options: PaperAdapterOptions = {}) {
     this.balance = options.initialBalance ?? 10_000;
@@ -72,13 +71,23 @@ export class PaperAdapter implements LiveExecutionPort {
   /** Rebuild state from the journal, then continue appending to it. */
   static restore(options: PaperAdapterOptions): PaperAdapter {
     const adapter = new PaperAdapter(options);
-    if (options.journal !== undefined) {
-      adapter.replaying = true;
-      for (const event of options.journal.readAll()) {
-        adapter.apply(event);
-      }
-      adapter.replaying = false;
+    if (options.journal === undefined) {
+      return adapter;
     }
+
+    const restored = replayPaperJournal(
+      options.journal.readAll(),
+      adapter.balance,
+      adapter.feeRate,
+    );
+    for (const [symbol, order] of restored.restingEntries) {
+      adapter.restingEntries.set(symbol, order);
+    }
+    for (const [symbol, trade] of restored.openPositions) {
+      adapter.openPositions.set(symbol, trade);
+    }
+    adapter.closedTrades.push(...restored.closedTrades);
+    adapter.balance = restored.balance;
     return adapter;
   }
 
@@ -330,72 +339,11 @@ export class PaperAdapter implements LiveExecutionPort {
   // Journal
   // -------------------------------------------------------------------------
 
+  /**
+   * Append to the audit trail. No replay guard is needed: restore is a pure
+   * fold in `replayPaperJournal`, so it never reaches this method at all.
+   */
   private record(event: JournalEvent): void {
-    if (!this.replaying && this.journal !== undefined) {
-      this.journal.append(event);
-    }
-  }
-
-  /** Rebuild one event's worth of state; used only while restoring. */
-  private apply(event: JournalEvent): void {
-    switch (event.type) {
-      case 'session':
-        this.balance = event.balance;
-        return;
-
-      case 'entry_placed':
-        this.restingEntries.set(event.signal.symbol, {
-          orderId: event.orderId,
-          signal: deserializeSignal(event.signal),
-          positionSize: event.positionSize,
-          placedAt: event.at,
-          status: 'open',
-          fillPrice: null,
-          fillTime: null,
-        });
-        return;
-
-      case 'entry_acknowledged':
-        return; // venue bookkeeping; paper has no venue
-
-      case 'entry_settled': {
-        const order = this.restingEntries.get(event.symbol);
-        if (order === undefined) {
-          return;
-        }
-        this.restingEntries.delete(event.symbol);
-        order.status = event.status;
-        if (event.status === 'filled') {
-          order.fillPrice = event.fillPrice;
-          order.fillTime = event.fillTime;
-          this.openPositions.set(
-            event.symbol,
-            new Trade({
-              signal: order.signal,
-              orderId: order.orderId,
-              entryTime: event.fillTime as number,
-              entryPrice: event.fillPrice as number,
-              positionSize: order.positionSize,
-              feeRate: this.feeRate,
-            }),
-          );
-        }
-        return;
-      }
-
-      case 'position_closed': {
-        const trade = this.openPositions.get(event.symbol);
-        if (trade === undefined) {
-          return;
-        }
-        this.openPositions.delete(event.symbol);
-        trade.exitPrice = event.exitPrice;
-        trade.exitTime = event.exitTime;
-        trade.exitReason = event.exitReason as ExitReason;
-        this.closedTrades.push(trade);
-        this.balance = event.balance;
-        return;
-      }
-    }
+    this.journal?.append(event);
   }
 }

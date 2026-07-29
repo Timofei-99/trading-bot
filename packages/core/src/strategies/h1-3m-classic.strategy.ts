@@ -2,6 +2,7 @@ import { CandleSeries } from '../domain/candle-series';
 import { MarketContext } from '../domain/market-context';
 import { Strategy } from '../domain/ports';
 import { Direction, Signal } from '../domain/signal';
+import { rawFractals, Sweep } from './h1-3m-fractals';
 
 const HOUR_MS = 3_600_000;
 const DAY_MS = 86_400_000;
@@ -17,20 +18,6 @@ export interface H1m3mClassicOptions {
   readonly contextThresholdPips?: number;
 }
 
-interface RawFractal {
-  readonly type: 'high' | 'low';
-  readonly level: number;
-  readonly barTime: number;
-  readonly confirmedAt: number;
-}
-
-interface Sweep {
-  readonly direction: 'LONG' | 'SHORT';
-  readonly stopLevel: number;
-  readonly fractalLevel: number;
-  readonly preSweepRef: number;
-}
-
 type MarketBias = 'BULLISH' | 'BEARISH' | 'RANGE';
 
 /** Floor to the start of the UTC day, the port of `Timestamp.normalize()`. */
@@ -42,12 +29,6 @@ const utcHour = (timeMs: number): number =>
 const utcDateKey = (timeMs: number): string =>
   new Date(utcDayStart(timeMs)).toISOString().slice(0, 10);
 
-/**
- * All confirmed 3-candle fractals in `candles`.
- *
- * Shared by the context check and the sweep detector, which is why it lives
- * outside the class — the same arrangement the Python module used.
- */
 /**
  * Which side swept most recently — the order-flow half of the daily bias.
  *
@@ -67,21 +48,6 @@ export function orderFlowIsBullish(
     return directionUp;
   }
   return (lastBullSweep ?? -Infinity) > (lastBearSweep ?? -Infinity);
-}
-
-function rawFractals(candles: CandleSeries): RawFractal[] {
-  const { high, low, time } = candles;
-  const out: RawFractal[] = [];
-
-  for (let i = 1; i < candles.length - 1; i++) {
-    if (high[i] > high[i - 1] && high[i] > high[i + 1]) {
-      out.push({ type: 'high', level: high[i], barTime: time[i], confirmedAt: time[i + 1] });
-    }
-    if (low[i] < low[i - 1] && low[i] < low[i + 1]) {
-      out.push({ type: 'low', level: low[i], barTime: time[i], confirmedAt: time[i + 1] });
-    }
-  }
-  return out;
 }
 
 /**
