@@ -6,11 +6,11 @@ import {
   SyncResult,
   TradeJournalPort,
 } from '@bot/core/domain/order';
-import { entryOrderId, exitOrderId } from '@bot/core/domain/order-id';
+import { entryOrderId, exitOrderId, isBotOrderId } from '@bot/core/domain/order-id';
 import { LiveExecutionPort } from '@bot/core/domain/ports';
 import { Direction, Signal } from '@bot/core/domain/signal';
 import { ExitReason, Trade } from '@bot/core/domain/trade';
-import { ExchangeClient, MarketSpec } from './exchange-client';
+import { ExchangeClient, ExchangeOrder, MarketSpec } from './exchange-client';
 import { OpenState, replayJournal } from './journal-replay';
 import { withRetry } from './retry';
 import { assertTradeable, quoteCurrency } from './venue-limits';
@@ -129,14 +129,22 @@ export class BybitAdapter implements LiveExecutionPort {
    * ask the venue rather than guess.
    */
   private async reconcile(): Promise<void> {
+    // Always ask, even when the journal claims nothing rests. That case used
+    // to return early, and it is the dangerous one: if the process died
+    // between placing an order and recording it, the venue holds an order this
+    // process knows nothing about, will never cancel, and will happily place a
+    // second one alongside.
+    const open = await this.retry('fetchOpenOrders', () =>
+      this.client.fetchOpenOrders(this.symbol),
+    );
+
+    this.assertNoOrphans(open);
+
     if (this.resting === null) {
       return;
     }
     const state = this.resting;
 
-    const open = await this.retry('fetchOpenOrders', () =>
-      this.client.fetchOpenOrders(this.symbol),
-    );
     const stillResting = open.find(
       (order) =>
         order.clientOrderId === state.order.orderId ||
@@ -443,6 +451,73 @@ export class BybitAdapter implements LiveExecutionPort {
   }
 
   // -------------------------------------------------------------------------
+
+  /**
+   * Refuse to start when the venue holds an order of ours that the journal
+   * cannot account for.
+   *
+   * The three cases the venue reports identically, and their opposite
+   * treatments:
+   *
+   *  - **Ours, and the journal knows it.** The normal path; reconciliation
+   *    below decides what became of it.
+   *  - **Not ours** — a hand-placed order, another tool, a different bot. Left
+   *    strictly alone. Cancelling somebody else's order because it was in the
+   *    way would be a far worse bug than the one this guard exists for.
+   *  - **Ours, and the journal does not know it.** Refuse to start.
+   *
+   * Refusing rather than cancelling is deliberate. The id encodes strategy,
+   * symbol, direction and bar, but not *which run* placed it, so an order
+   * carrying our shape could belong to a second bot on the same account and
+   * the same symbol. Cancelling on that guess spends someone else's money.
+   * Refusing cannot make anything worse, and it puts a human in front of a
+   * genuinely ambiguous situation — which is the right place for one.
+   *
+   * Not covered here: whether the venue agrees about an open POSITION. On spot
+   * a position is a balance rather than an order, so `fetchOpenOrders` cannot
+   * see it, and checking it properly needs base-currency accounting that
+   * differs per product line. Stated rather than silently implied.
+   */
+  private assertNoOrphans(open: readonly ExchangeOrder[]): void {
+    const known = new Set<string>();
+    if (this.resting !== null) {
+      known.add(this.resting.order.orderId);
+      known.add(exitOrderId(this.resting.order.orderId));
+    }
+    if (this.position !== null) {
+      known.add(this.position.orderId);
+      known.add(exitOrderId(this.position.orderId));
+    }
+
+    const orphans = open.filter(
+      (order) => isBotOrderId(order.clientOrderId) && !known.has(order.clientOrderId as string),
+    );
+
+    if (orphans.length === 0) {
+      const theirs = open.filter((order) => !isBotOrderId(order.clientOrderId));
+      if (theirs.length > 0) {
+        this.log(
+          `reconciled: ${theirs.length} order(s) at the venue are not this bot's and were left alone`,
+        );
+      }
+      return;
+    }
+
+    const described = orphans
+      .map(
+        (order) => `${order.clientOrderId} (venue id ${order.id}, ${order.side} ${order.amount})`,
+      )
+      .join(', ');
+
+    throw new Error(
+      `Refusing to start: the venue holds ${orphans.length} order(s) carrying this bot's id that ` +
+        `the journal does not account for — ${described}. ` +
+        'This means a previous run placed an order and died before recording it. ' +
+        'Cancel the order at the venue (or move it into the journal) and start again. ' +
+        'Nothing was cancelled automatically: the id does not say which run placed it, ' +
+        'so it may belong to another bot on this account.',
+    );
+  }
 
   private requireMarket(): MarketSpec {
     if (this.market === null) {

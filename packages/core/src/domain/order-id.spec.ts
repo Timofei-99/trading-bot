@@ -1,4 +1,4 @@
-import { entryOrderId, exitOrderId } from './order-id';
+import { entryOrderId, exitOrderId, isBotOrderId } from './order-id';
 import { Direction, Signal } from './signal';
 
 const BAR = Date.UTC(2024, 0, 15, 9);
@@ -107,5 +107,33 @@ describe('exitOrderId', () => {
 
   it('still fits inside Bybit orderLinkId', () => {
     expect(exitOrderId(entryOrderId(signal())).length).toBeLessThanOrEqual(36);
+  });
+});
+
+describe('isBotOrderId', () => {
+  it('recognises an entry id it generated', () => {
+    expect(isBotOrderId(entryOrderId(signal()))).toBe(true);
+  });
+
+  it('recognises the matching exit id', () => {
+    expect(isBotOrderId(exitOrderId(entryOrderId(signal())))).toBe(true);
+  });
+
+  it.each([
+    ['a hand-placed order', 'my-manual-order'],
+    ['another tool with its own scheme', 'tv-webhook-42'],
+    ['an empty id', ''],
+    ['the prefix alone', 'bot-'],
+    ['a wrong-length hash', 'bot-abc'],
+    ['a non-hex hash', 'bot-zzzzzzzz'],
+    ['a doubled suffix', 'bot-deadbeef-x-x'],
+  ])('does not claim %s', (_name, id) => {
+    expect(isBotOrderId(id)).toBe(false);
+  });
+
+  it('treats an absent id as not ours', () => {
+    // A venue that reports no client id tells us nothing, and guessing that
+    // silence means "ours" would let reconciliation cancel a stranger's order.
+    expect(isBotOrderId(null)).toBe(false);
   });
 });

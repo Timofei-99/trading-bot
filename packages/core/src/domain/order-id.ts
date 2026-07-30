@@ -67,3 +67,23 @@ function fingerprint(input: string): string {
   }
   return hash.toString(16).padStart(8, '0');
 }
+
+/** Prefix every id this bot generates carries. */
+export const ORDER_ID_PREFIX = 'bot-';
+
+/** Compiled once: this runs per order in a list fetched from the venue. */
+const BOT_ORDER_ID = new RegExp(`^${ORDER_ID_PREFIX}[0-9a-f]{8}(-x)?$`);
+
+/**
+ * Whether an id at the venue looks like one this bot produced.
+ *
+ * Used by startup reconciliation to tell "an order we placed and failed to
+ * record" from "an order somebody placed by hand". The two need opposite
+ * treatment, and the venue reports both the same way.
+ *
+ * Deliberately a shape check rather than a recomputation: an order we lost
+ * track of is exactly the one whose signal we can no longer reproduce.
+ */
+export function isBotOrderId(clientOrderId: string | null): boolean {
+  return clientOrderId !== null && BOT_ORDER_ID.test(clientOrderId);
+}
