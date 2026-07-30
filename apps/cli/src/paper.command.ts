@@ -22,6 +22,7 @@ interface PaperOptions {
   fee?: number;
   slippage?: number;
   worstCase?: boolean;
+  fundingRate?: number;
   entryTimeout?: number;
   maxDailyDd?: number;
   maxLosses?: number;
@@ -72,6 +73,7 @@ export class PaperCommand extends CommandRunner {
       feeRate: options.fee ?? 0.001, // paper defaults to REALISTIC costs
       slippage: options.slippage ?? 0,
       worstCase: options.worstCase ?? false,
+      fundingRatePer8h: options.fundingRate,
       entryTimeoutMs: (options.entryTimeout ?? 60) * 60_000,
       journal,
     });
@@ -231,6 +233,14 @@ export class PaperCommand extends CommandRunner {
   @Option({ flags: '--journal <path>', description: 'Journal file (default data/journal/…)' })
   parseJournal(value: string): string {
     return value;
+  }
+
+  @Option({
+    flags: '--funding-rate <per8h>',
+    description: 'Perpetuals: funding per 8h; longs pay, shorts receive (default 0)',
+  })
+  parseFundingRate(value: string): number {
+    return Number.parseFloat(value);
   }
 
   @Option({ flags: '--once', description: 'Warm up, process one tick, print state and exit' })

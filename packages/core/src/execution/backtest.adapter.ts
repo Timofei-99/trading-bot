@@ -1,5 +1,6 @@
 import { ExecutionPort, Position } from '../domain/ports';
 import { Direction, Signal } from '../domain/signal';
+import { fundingCharge, fundingEventsBetween } from './funding';
 import { ExitReason, Trade } from '../domain/trade';
 
 export interface BacktestReport {
@@ -21,6 +22,12 @@ export interface BacktestAdapterOptions {
    * Default 0 keeps every number bit-identical to the fee-less code.
    */
   readonly feeRate?: number;
+  /**
+   * Perpetuals only: funding rate per 8h interval (e.g. 0.0001 = 0.01%).
+   * Longs pay it, shorts receive it. Default 0 keeps spot semantics AND the
+   * bit-exact parity path.
+   */
+  readonly fundingRatePer8h?: number;
   /**
    * Adverse fill on MARKET-like exits (stop loss, expiry), as a fraction of
    * price. Limit-like fills — the entry and the take profit — are not
@@ -53,9 +60,11 @@ export class BacktestAdapter implements ExecutionPort {
   balance: number;
   readonly riskPerTrade: number;
   readonly feeRate: number;
+  readonly fundingRatePer8h: number;
   readonly slippage: number;
   readonly worstCase: boolean;
 
+  private readonly lastBarTime = new Map<string, number>();
   private readonly openPositions = new Map<string, Trade>();
   private readonly closedTrades: Trade[] = [];
 
@@ -63,6 +72,7 @@ export class BacktestAdapter implements ExecutionPort {
     this.balance = options.initialBalance ?? 10_000;
     this.riskPerTrade = options.riskPerTrade ?? 0.01;
     this.feeRate = options.feeRate ?? 0;
+    this.fundingRatePer8h = options.fundingRatePer8h ?? 0;
     this.slippage = options.slippage ?? 0;
     this.worstCase = options.worstCase ?? false;
   }
@@ -126,8 +136,11 @@ export class BacktestAdapter implements ExecutionPort {
   ): void {
     const trade = this.openPositions.get(symbol);
     if (trade === undefined) {
+      this.lastBarTime.set(symbol, candleTime);
       return;
     }
+
+    this.accrueFunding(trade, symbol, candleHigh, candleLow, candleTime, candleClose);
 
     const { stopLoss, takeProfit, direction, expiryTime } = trade.signal;
 
@@ -163,6 +176,37 @@ export class BacktestAdapter implements ExecutionPort {
       const price = candleClose !== null ? candleClose : (candleHigh + candleLow) / 2;
       this.closeTrade(symbol, this.slipped(price, direction), candleTime, 'expiry');
     }
+  }
+
+  /**
+   * Charge funding for the boundaries this bar crossed while the position was
+   * held. Accrued before the exit checks: whether a boundary fell before or
+   * after an intra-bar exit is unknowable from OHLC, and charging the held
+   * bar is the conservative reading. A no-op at the default rate of zero.
+   */
+  private accrueFunding(
+    trade: Trade,
+    symbol: string,
+    candleHigh: number,
+    candleLow: number,
+    candleTime: number,
+    candleClose: number | null,
+  ): void {
+    if (this.fundingRatePer8h !== 0) {
+      const since = this.lastBarTime.get(symbol) ?? trade.entryTime;
+      const events = fundingEventsBetween(Math.max(since, trade.entryTime), candleTime);
+      if (events > 0) {
+        const mark = candleClose !== null ? candleClose : (candleHigh + candleLow) / 2;
+        trade.fundingCost += fundingCharge(
+          trade.signal.direction,
+          trade.positionSize,
+          mark,
+          this.fundingRatePer8h,
+          events,
+        );
+      }
+    }
+    this.lastBarTime.set(symbol, candleTime);
   }
 
   /** Adverse fill on a market-like exit; a no-op while slippage is 0. */
@@ -267,6 +311,9 @@ export class BacktestAdapter implements ExecutionPort {
         : trade.positionSize * (trade.entryPrice - price);
 
     this.balance += dollarPnl;
+    if (trade.fundingCost !== 0) {
+      this.balance -= trade.fundingCost;
+    }
     if (this.feeRate !== 0) {
       // Both sides of the round trip are charged at close. (An entry fee is
       // really paid at fill; charging it here only misstates trades still
