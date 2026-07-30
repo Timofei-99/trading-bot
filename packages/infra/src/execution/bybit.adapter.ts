@@ -13,7 +13,7 @@ import { ExitReason, Trade } from '@bot/core/domain/trade';
 import { ExchangeClient, ExchangeOrder, MarketSpec } from './exchange-client';
 import { OpenState, replayJournal } from './journal-replay';
 import { withRetry } from './retry';
-import { assertTradeable, quoteCurrency } from './venue-limits';
+import { assertTradeable, baseCurrency, quoteCurrency } from './venue-limits';
 
 export interface BybitAdapterOptions {
   readonly symbol: string;
@@ -139,6 +139,7 @@ export class BybitAdapter implements LiveExecutionPort {
     );
 
     this.assertNoOrphans(open);
+    await this.reconcilePosition(open);
 
     if (this.resting === null) {
       return;
@@ -516,6 +517,67 @@ export class BybitAdapter implements LiveExecutionPort {
         'Cancel the order at the venue (or move it into the journal) and start again. ' +
         'Nothing was cancelled automatically: the id does not say which run placed it, ' +
         'so it may belong to another bot on this account.',
+    );
+  }
+
+  /**
+   * Verify the venue still holds the coins the journal's open position says
+   * we bought.
+   *
+   * On spot there is no position object — the position IS the base-currency
+   * balance — so this counts the TOTAL balance, not the free one: a healthy
+   * position's coins are LOCKED under its resting exit legs, and its free
+   * balance is near zero precisely when everything is fine.
+   *
+   * Three outcomes:
+   *
+   *  - **Covered** — proceed.
+   *  - **Short, and nothing rests on the symbol** — the exit legs are gone
+   *    and so are the coins: the position was closed at the venue while we
+   *    were away. NOT an error. The engine's catch-up settlement books that
+   *    exit from the bars it replays, so this is logged loudly and left for
+   *    it. Refusing here would break exactly the crash recovery the catch-up
+   *    exists for.
+   *  - **Short although exit orders still rest** — the order structure is
+   *    intact but the coins are not: withdrawn or sold around the bot.
+   *    Nothing can settle that from bars, so refuse to start.
+   *
+   * Tolerance: Bybit charges the buy-side fee in base currency on spot, so an
+   * intact position legitimately holds size*(1-fee); one amountStep on top
+   * covers dust rounding. The reverse direction — no position in the journal
+   * but coins at the venue — is deliberately not judged: the operator's own
+   * holdings are none of this bot's business.
+   */
+  private async reconcilePosition(open: readonly ExchangeOrder[]): Promise<void> {
+    if (this.position === null) {
+      return;
+    }
+
+    const base = baseCurrency(this.symbol);
+    const total = await this.retry('fetchTotalBalance', () => this.client.fetchTotalBalance(base));
+    const needed =
+      this.position.positionSize * (1 - this.feeRate) - this.requireMarket().amountStep;
+
+    if (total >= needed) {
+      this.log(`reconciled: position backed by ${total} ${base} at the venue`);
+      return;
+    }
+
+    if (open.length === 0) {
+      this.log(
+        `reconciled: position ${this.position.orderId} appears CLOSED at the venue ` +
+          `(${total} ${base} on hand, ~${this.position.positionSize} expected); ` +
+          'catch-up settlement will book the exit from the missed bars',
+      );
+      return;
+    }
+
+    throw new Error(
+      `Refusing to start: the journal holds an open position of ` +
+        `${this.position.positionSize} ${base} on ${this.symbol}, exit orders still rest at ` +
+        `the venue, yet the account's total is only ${total} ${base}. Coins were withdrawn ` +
+        'or sold around the bot — nothing here can account for that. Reconcile the account ' +
+        'by hand and start again.',
     );
   }
 

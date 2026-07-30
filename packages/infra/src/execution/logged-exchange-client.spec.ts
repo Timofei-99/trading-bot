@@ -40,6 +40,7 @@ function stub(over: Partial<ExchangeClient> = {}): ExchangeClient {
     fetchOrder: async () => ORDER,
     fetchOpenOrders: async () => [ORDER],
     fetchFreeBalance: async () => 1000,
+    fetchTotalBalance: async () => 1500,
     fetchServerTime: async () => 1_700_000_000_000,
     ...over,
   };
@@ -178,12 +179,14 @@ describe('LoggedExchangeClient', () => {
       await client.loadMarket('BTC/USDT');
       await client.cancelOrder('BTC/USDT', 'venue-1');
       await client.fetchFreeBalance('USDT');
+      await client.fetchTotalBalance('BTC');
       await client.fetchServerTime();
 
       expect(entries.map((entry) => entry.fields.call)).toEqual([
         'loadMarket',
         'cancelOrder',
         'fetchFreeBalance',
+        'fetchTotalBalance',
         'fetchServerTime',
       ]);
     });

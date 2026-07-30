@@ -60,7 +60,7 @@ class FakeExchange {
   }
   async fetchBalance(...args: unknown[]) {
     calls.push({ method: 'fetchBalance', args });
-    return { free: { USDT: 1234.5 } };
+    return { free: { USDT: 1234.5 }, total: { USDT: 2000, BTC: 0.5 } };
   }
   async fetchTime() {
     calls.push({ method: 'fetchTime', args: [] });
@@ -304,6 +304,16 @@ describe('market data', () => {
 
   it('reports zero for a currency the account does not hold', async () => {
     expect(await client().fetchFreeBalance('DOGE')).toBe(0);
+  });
+
+  it('reads the total balance, free plus locked', async () => {
+    // The position-side reconcile counts coins locked under exit legs; `free`
+    // would read an intact position as missing.
+    expect(await client().fetchTotalBalance('BTC')).toBe(0.5);
+  });
+
+  it('reports zero total for a currency the account does not hold', async () => {
+    expect(await client().fetchTotalBalance('DOGE')).toBe(0);
   });
 
   it('reads the venue clock', async () => {

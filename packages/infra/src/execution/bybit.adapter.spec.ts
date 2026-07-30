@@ -167,6 +167,15 @@ class FakeExchange implements ExchangeClient {
     return this.balance;
   }
 
+  /** Per-currency totals; unset currencies fall back to `balance` so the
+   *  existing quote-side tests keep working unchanged. */
+  totals: Record<string, number> = {};
+
+  async fetchTotalBalance(currency: string): Promise<number> {
+    this.maybeFail('fetchTotalBalance');
+    return this.totals[currency] ?? this.balance;
+  }
+
   async fetchServerTime(): Promise<number> {
     this.maybeFail('fetchServerTime');
     return this.serverTime;

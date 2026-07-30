@@ -68,6 +68,12 @@ export class LoggedExchangeClient implements ExchangeClient {
     );
   }
 
+  async fetchTotalBalance(currency: string): Promise<number> {
+    return this.record('fetchTotalBalance', { currency }, () =>
+      this.inner.fetchTotalBalance(currency),
+    );
+  }
+
   async fetchServerTime(): Promise<number> {
     return this.record('fetchServerTime', {}, () => this.inner.fetchServerTime());
   }

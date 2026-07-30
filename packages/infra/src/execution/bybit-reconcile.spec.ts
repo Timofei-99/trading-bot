@@ -90,6 +90,14 @@ class Venue implements ExchangeClient {
   async fetchFreeBalance(): Promise<number> {
     return 10_000;
   }
+  /** Per-currency TOTALS (free + locked); generous default so tests that do
+   *  not care about the position side never trip over it. */
+  totals: Record<string, number> = {};
+  readonly totalAsked: string[] = [];
+  async fetchTotalBalance(currency: string): Promise<number> {
+    this.totalAsked.push(currency);
+    return this.totals[currency] ?? 10_000;
+  }
   async fetchServerTime(): Promise<number> {
     return T0;
   }
@@ -269,6 +277,96 @@ describe('reconcile', () => {
 
       expect(subject.text()).toContain('ended as canceled');
       expect(venue.fetched).toEqual(['venue-1']);
+    });
+  });
+
+  describe('the position side', () => {
+    const journalWithPosition = () => {
+      const journal = new MemoryJournal();
+      journal.append({
+        type: 'entry_placed',
+        at: T0,
+        orderId: OURS,
+        positionSize: 0.5,
+        signal: serializeSignal(signal()),
+      });
+      journal.append({
+        type: 'entry_settled',
+        at: T0,
+        orderId: OURS,
+        symbol: SYMBOL,
+        status: 'filled',
+        fillPrice: 100,
+        fillTime: T0,
+      });
+      return journal;
+    };
+
+    it('counts the TOTAL base balance, not the free one', async () => {
+      // A healthy spot position's coins are LOCKED under its resting exit
+      // legs; judging by free balance would refuse on every intact position.
+      const venue = new Venue();
+      venue.openOrders = [order({ id: 'venue-exit', clientOrderId: exitOrderId(OURS) })];
+      venue.totals = { BTC: 0.5 };
+
+      const subject = adapter(venue, journalWithPosition());
+      await subject.subject.start(T0);
+
+      expect(venue.totalAsked).toEqual(['BTC']);
+      expect(subject.text()).toContain('position backed by 0.5 BTC');
+    });
+
+    it('tolerates the buy-side fee having been charged in base currency', async () => {
+      // Bybit spot shaves the fee off the coins received, so an intact
+      // position holds size*(1-fee); that must not read as a shortfall.
+      const venue = new Venue();
+      venue.openOrders = [order({ id: 'venue-exit', clientOrderId: exitOrderId(OURS) })];
+      venue.totals = { BTC: 0.5 * 0.999 };
+
+      await expect(
+        adapter(venue, journalWithPosition()).subject.start(T0),
+      ).resolves.toBeUndefined();
+    });
+
+    it('treats gone coins with no resting orders as an exit to catch up on', async () => {
+      // The TP filled while the process was down: coins sold, legs gone. That
+      // is the crash-recovery path — catch-up settlement books the exit from
+      // the missed bars, so refusing here would break exactly what it exists
+      // for.
+      const venue = new Venue();
+      venue.openOrders = [];
+      venue.totals = { BTC: 0 };
+
+      const subject = adapter(venue, journalWithPosition());
+      await subject.subject.start(T0);
+
+      expect(subject.text()).toContain('appears CLOSED at the venue');
+      // The position is left for the engine to settle, not silently dropped.
+      expect(await subject.subject.getPosition(SYMBOL)).not.toBeNull();
+    });
+
+    it('refuses when the coins are gone but the exit orders still rest', async () => {
+      // Order structure intact, coins missing: withdrawn or sold around the
+      // bot. No bar can settle that, and no guess about it is safe.
+      const venue = new Venue();
+      venue.openOrders = [order({ id: 'venue-exit', clientOrderId: exitOrderId(OURS) })];
+      venue.totals = { BTC: 0.1 };
+
+      await expect(adapter(venue, journalWithPosition()).subject.start(T0)).rejects.toThrow(
+        /withdrawn or sold around the bot/,
+      );
+    });
+
+    it("does not judge the operator's holdings when no position is open", async () => {
+      // Coins at the venue without a journal position are the operator's own
+      // business; the balance is not even queried.
+      const venue = new Venue();
+      venue.totals = { BTC: 3 };
+
+      const subject = adapter(venue, new MemoryJournal());
+      await subject.subject.start(T0);
+
+      expect(venue.totalAsked).toEqual([]);
     });
   });
 

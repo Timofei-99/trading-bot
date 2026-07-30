@@ -67,6 +67,14 @@ export interface ExchangeClient {
   fetchOpenOrders(symbol: string): Promise<ExchangeOrder[]>;
   /** Free balance of a currency, e.g. the quote currency of the pair. */
   fetchFreeBalance(currency: string): Promise<number>;
+  /**
+   * TOTAL balance of a currency: free plus locked in open orders.
+   *
+   * The position-side reconcile needs this and must not use `free`: a healthy
+   * spot position has its base coins LOCKED under the resting exit legs, so
+   * its free balance is near zero precisely when everything is fine.
+   */
+  fetchTotalBalance(currency: string): Promise<number>;
   /** Venue clock, for detecting a skewed local clock before signing requests. */
   fetchServerTime(): Promise<number>;
 }
@@ -174,6 +182,12 @@ export class CcxtExchangeClient implements ExchangeClient {
     const balance = await this.connect().fetchBalance({ category: this.category });
     const free = (balance.free ?? {}) as unknown as Record<string, number | undefined>;
     return Number(free[currency] ?? 0);
+  }
+
+  async fetchTotalBalance(currency: string): Promise<number> {
+    const balance = await this.connect().fetchBalance({ category: this.category });
+    const total = (balance.total ?? {}) as unknown as Record<string, number | undefined>;
+    return Number(total[currency] ?? 0);
   }
 
   async fetchServerTime(): Promise<number> {
