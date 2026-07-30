@@ -58,9 +58,9 @@ module.exports = {
     './packages/core/src/engine/': { statements: 88, branches: 80, functions: 80, lines: 88 },
     './packages/core/src/execution/': { statements: 97, branches: 88, functions: 100, lines: 97 },
     // The commands, tested through their run() methods against stub services
-    // and a temp-dir journal. `visualize` and cli.module are still uncovered;
-    // everything else is real.
-    './apps/cli/src/': { statements: 74, branches: 53, functions: 77, lines: 75 },
+    // and a temp-dir journal. The one file still at 0% is cli.module.ts —
+    // pure DI wiring, exercised implicitly by every command test.
+    './apps/cli/src/': { statements: 81, branches: 57, functions: 83, lines: 82 },
     // The layer that actually talks to the venue. Was 0% on both clients
     // before the restart-safety work; holding the line matters more here than
     // anywhere except the domain.
