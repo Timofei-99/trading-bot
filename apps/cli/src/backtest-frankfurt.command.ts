@@ -85,7 +85,7 @@ export class BacktestFrankfurtCommand extends CommandRunner {
         fileOutcomes.push({ file: basename(csvPath), outcome: result.outcome });
       }
 
-      printMultiFileSummary(fileOutcomes);
+      printMultiFileSummary(fileOutcomes, balance);
 
       const openCharts = options.charts === true || options.losers === true;
       if (openCharts && chartPaths.length > 0) {
@@ -289,14 +289,12 @@ export class BacktestFrankfurtCommand extends CommandRunner {
 
 function printMultiFileSummary(
   rows: Array<{ file: string; outcome: BacktestOutcome }>,
+  initialBalance: number,
 ): void {
   if (rows.length === 0) return;
 
-  const initialBalance = rows[0]?.outcome.finalBalance / (1 + rows[0]?.outcome.report.totalPnlPct) || 0;
-  const usd = (pct: number) => {
-    const val = initialBalance * pct;
-    return `${val >= 0 ? '+' : ''}$${Math.round(Math.abs(val)).toLocaleString('en-US')}`;
-  };
+  const usd = (dollars: number) =>
+    `${dollars >= 0 ? '+' : '-'}$${Math.round(Math.abs(dollars)).toLocaleString('en-US')}`;
 
   const col = {
     date: 10,
@@ -332,7 +330,7 @@ function printMultiFileSummary(
   let totalTrades = 0;
   let totalWinners = 0;
   let totalLosers = 0;
-  let sumPnl = 0;
+  let sumDollars = 0;
   let maxDd = 0;
   let sumPf = 0;
   let pfCount = 0;
@@ -343,14 +341,17 @@ function printMultiFileSummary(
     const span = BacktestRunnerService.span(candles);
     const dateTag = span ? new Date(span.fromMs).toISOString().slice(0, 10) : file.slice(0, 10);
 
+    const dollars = outcome.finalBalance - initialBalance;
+    const portfolioPct = dollars / initialBalance;
+
     const line = [
       dateTag.padEnd(col.date),
       pad(String(candles.length), col.bars),
       pad(String(r.totalTrades), col.trades),
       pad(`${r.winners} / ${r.losers}`, col.wl),
       pad(r.totalTrades > 0 ? percent1(r.winRate) : '—', col.wr),
-      pad(r.totalTrades > 0 ? signedPercent2(r.totalPnlPct) : '—', col.pnl),
-      pad(r.totalTrades > 0 ? usd(r.totalPnlPct) : '—', col.usd),
+      pad(r.totalTrades > 0 ? signedPercent2(portfolioPct) : '—', col.pnl),
+      pad(r.totalTrades > 0 ? usd(dollars) : '—', col.usd),
       pad(r.totalTrades > 0 ? percent2(r.maxDrawdownPct) : '—', col.dd),
       pad(r.totalTrades > 0 ? profitFactor(r.profitFactor) : '—', col.pf),
     ].join('  ');
@@ -359,7 +360,7 @@ function printMultiFileSummary(
     totalTrades += r.totalTrades;
     totalWinners += r.winners;
     totalLosers += r.losers;
-    sumPnl += r.totalPnlPct;
+    sumDollars += dollars;
     maxDd = Math.max(maxDd, r.maxDrawdownPct);
     if (Number.isFinite(r.profitFactor) && r.totalTrades > 0) {
       sumPf += r.profitFactor;
@@ -369,6 +370,7 @@ function printMultiFileSummary(
 
   const avgWr = totalTrades > 0 ? totalWinners / totalTrades : 0;
   const avgPf = pfCount > 0 ? sumPf / pfCount : 0;
+  const totalPortfolioPct = sumDollars / initialBalance;
 
   console.log(divider);
   const total = [
@@ -377,11 +379,71 @@ function printMultiFileSummary(
     pad(String(totalTrades), col.trades),
     pad(`${totalWinners} / ${totalLosers}`, col.wl),
     pad(totalTrades > 0 ? percent1(avgWr) : '—', col.wr),
-    pad(totalTrades > 0 ? signedPercent2(sumPnl) : '—', col.pnl),
-    pad(totalTrades > 0 ? usd(sumPnl) : '—', col.usd),
+    pad(totalTrades > 0 ? signedPercent2(totalPortfolioPct) : '—', col.pnl),
+    pad(totalTrades > 0 ? usd(sumDollars) : '—', col.usd),
     pad(totalTrades > 0 ? percent2(maxDd) : '—', col.dd),
     pad(totalTrades > 0 ? profitFactor(avgPf) : '—', col.pf),
   ].join('  ');
   console.log(total);
   console.log(divider);
+
+  printStreaks(rows, initialBalance);
+}
+
+function printStreaks(
+  rows: Array<{ file: string; outcome: BacktestOutcome }>,
+  initialBalance: number,
+): void {
+  // Flatten to one result per trade (days without trades are skipped).
+  const results: Array<{ date: string; won: boolean; dollars: number }> = [];
+  for (const { file, outcome } of rows) {
+    if (outcome.report.totalTrades === 0) continue;
+    const candles = outcome.context.candles('1m');
+    const span = BacktestRunnerService.span(candles);
+    const date = span ? new Date(span.fromMs).toISOString().slice(0, 10) : file.slice(0, 10);
+    const dollars = outcome.finalBalance - initialBalance;
+    results.push({ date, won: dollars >= 0, dollars });
+  }
+
+  if (results.length === 0) return;
+
+  // Compute all streaks.
+  type Streak = { won: boolean; count: number; dollars: number; from: string; to: string };
+  const streaks: Streak[] = [];
+  let cur: Streak = { won: results[0].won, count: 1, dollars: results[0].dollars, from: results[0].date, to: results[0].date };
+
+  for (let i = 1; i < results.length; i++) {
+    const r = results[i];
+    if (r.won === cur.won) {
+      cur.count += 1;
+      cur.dollars += r.dollars;
+      cur.to = r.date;
+    } else {
+      streaks.push(cur);
+      cur = { won: r.won, count: 1, dollars: r.dollars, from: r.date, to: r.date };
+    }
+  }
+  streaks.push(cur);
+
+  const winStreaks  = streaks.filter((s) => s.won);
+  const lossStreaks = streaks.filter((s) => !s.won);
+
+  const maxWin  = winStreaks.reduce((m, s) => (s.count > m.count ? s : m), winStreaks[0]  ?? { count: 0, dollars: 0, from: '—', to: '—' });
+  const maxLoss = lossStreaks.reduce((m, s) => (s.count > m.count ? s : m), lossStreaks[0] ?? { count: 0, dollars: 0, from: '—', to: '—' });
+
+  const last = streaks[streaks.length - 1];
+  const currentLabel = last.won ? `+${last.count} winning` : `-${last.count} losing`;
+
+  const usd = (d: number) => `${d >= 0 ? '+' : '-'}$${Math.round(Math.abs(d)).toLocaleString('en-US')}`;
+
+  console.log('\n=== Streak analysis ===');
+  console.log(`  Max winning streak : ${maxWin.count} trades   ${usd(maxWin.dollars)}   (${maxWin.from} → ${maxWin.to})`);
+  console.log(`  Max losing streak  : ${maxLoss.count} trades   ${usd(maxLoss.dollars)}   (${maxLoss.from} → ${maxLoss.to})`);
+  console.log(`  Current streak     : ${currentLabel}   (since ${last.from})`);
+  console.log();
+
+  console.log('  All losing streaks:');
+  for (const s of lossStreaks) {
+    console.log(`    ${s.count} × loss   ${usd(s.dollars).padStart(10)}   ${s.from} → ${s.to}`);
+  }
 }
