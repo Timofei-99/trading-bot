@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 import { ApplicationModule } from '@bot/app/application.module';
 import { BacktestCommand } from './backtest.command';
 import { BacktestFrankfurtCommand } from './backtest-frankfurt.command';
+import { DownloadDukascopyCommand } from './download-dukascopy.command';
 import { BacktestH1m3mCommand } from './backtest-h1-3m.command';
 import { BacktestOb4hCommand } from './backtest-ob4h.command';
 import { HaltCommand, ResumeCommand } from './halt.command';
@@ -20,6 +21,7 @@ import { VisualizeCommand } from './visualize.command';
     { provide: MARKET_DATA_FACTORY, useClass: CcxtMarketDataFactory },
     VersionCommand,
     StrategiesCommand,
+    DownloadDukascopyCommand,
     BacktestCommand,
     BacktestOb4hCommand,
     BacktestFrankfurtCommand,
