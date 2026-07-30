@@ -44,9 +44,10 @@ export const SNR_SUPPORT = 'rgba(38, 166, 154, 0.15)';
 export const SNR_RESISTANCE = 'rgba(239, 83, 80, 0.15)';
 export const SNR_BROKEN = 'rgba(120, 113, 108, 0.10)';
 
-export const IB_FILL = 'rgba(150, 150, 150, 0.15)';
-export const IB_BORDER = 'rgba(200, 200, 200, 0.35)';
-export const IB_MID = 'rgba(220, 220, 220, 0.55)';
+export const IB_SESSION_BAND = 'rgba(245, 158, 11, 0.10)';
+export const IB_FILL = 'rgba(245, 158, 11, 0.20)';
+export const IB_BORDER = 'rgba(245, 158, 11, 0.60)';
+export const IB_MID = 'rgba(245, 158, 11, 0.80)';
 
 export const TRADE_ENTRY = '#3b82f6';
 export const TRADE_SL = '#ef4444';

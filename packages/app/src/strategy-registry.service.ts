@@ -49,8 +49,8 @@ export const BUILT_IN_STRATEGIES: StrategyDescriptor[] = [
     description: 'Frankfurt IB high/low breakout into London session, fixed 1:1 RR',
     requiredTimeframes: ['1m'],
     defaultParams: {
-      ibStart: '08:00',
-      ibEnd: '09:00',
+      ibStart: '06:00',
+      ibEnd: '07:00',
       sessionEnd: '12:00',
       sessionTz: 'UTC',
       timeframe: '1m',

@@ -235,6 +235,9 @@ function drawInitialBalance(
 ): void {
   const ibEnd = pattern.endTime ?? pattern.startTime;
 
+  // Full-height vertical band so the session window is visible at any price.
+  builder.addVerticalBand(pattern.startTime, ibEnd, style.IB_SESSION_BAND, refs);
+
   // Shaded rectangle only over the IB formation window.
   builder.addRect({
     x0: pattern.startTime,

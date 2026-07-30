@@ -55,8 +55,8 @@ export class FrankfurtIb50Strategy extends Strategy {
 
   constructor(options: FrankfurtIb50Options = {}) {
     super();
-    this.ibStart = options.ibStart ?? '08:00';
-    this.ibEnd = options.ibEnd ?? '09:00';
+    this.ibStart = options.ibStart ?? '06:00';
+    this.ibEnd = options.ibEnd ?? '07:00';
     this.sessionEnd = options.sessionEnd ?? '12:00';
     this.sessionTz = options.sessionTz ?? 'UTC';
     this.timeframe = options.timeframe ?? '1m';

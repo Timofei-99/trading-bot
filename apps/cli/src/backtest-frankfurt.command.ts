@@ -1,19 +1,25 @@
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { execSync } from 'node:child_process';
+import { existsSync, readdirSync } from 'node:fs';
+import { basename, join } from 'node:path';
 
 import { Command, CommandRunner, Option } from 'nest-commander';
 
-import { BacktestRunnerService } from '@bot/app/backtest-runner.service';
+import { BacktestOutcome, BacktestRunnerService } from '@bot/app/backtest-runner.service';
 import { ReportService } from '@bot/app/report.service';
 import { InitialBalanceDetector } from '@bot/core/detectors/initial-balance.detector';
+import { BacktestReport } from '@bot/core/execution/backtest.adapter';
 import { renderChart } from '@bot/infra/visualization/chart.renderer';
-import { formatReportLines } from './report-format';
+import { formatReportLines, percent1, percent2, profitFactor, signedPercent2 } from './report-format';
 
 interface FrankfurtOptions {
   source?: 'mt5' | 'yahoo';
   csv?: string;
+  dir?: string;
+  from?: string;
+  to?: string;
   tz?: string;
   charts?: boolean;
+  losers?: boolean;
   balance?: number;
 }
 
@@ -36,6 +42,73 @@ export class BacktestFrankfurtCommand extends CommandRunner {
   async run(_args: string[], options: FrankfurtOptions = {}): Promise<void> {
     const source = options.source ?? 'mt5';
     const balance = options.balance ?? 10_000;
+
+    if (source === 'yahoo') {
+      await this.runSingle(options, balance);
+      return;
+    }
+
+    // --dir: run one backtest per CSV file found in the directory
+    const dir = options.dir;
+    if (dir !== undefined || options.csv === undefined) {
+      const searchDir = dir ?? 'data';
+      if (!existsSync(searchDir)) {
+        console.log(`Directory not found: ${searchDir}`);
+        return;
+      }
+      const csvFiles = readdirSync(searchDir)
+        .filter((f) => {
+          if (!f.toLowerCase().endsWith('.csv') || !f.includes('_ASK_')) return false;
+          const m = /(\d{4}-\d{2}-\d{2})/.exec(f);
+          if (m === null) return true;
+          const date = m[1];
+          if (options.from !== undefined && date < options.from) return false;
+          if (options.to !== undefined && date > options.to) return false;
+          return true;
+        })
+        .sort()
+        .map((f) => join(searchDir, f));
+
+      if (csvFiles.length === 0) {
+        console.log(`No CSV files found in ${searchDir}.`);
+        return;
+      }
+
+      const chartPaths: string[] = [];
+      const fileOutcomes: Array<{ file: string; outcome: BacktestOutcome }> = [];
+      for (const csvPath of csvFiles) {
+        console.log(`\n=== ${basename(csvPath)} ===`);
+        const result = await this.runSingle({ ...options, csv: csvPath }, balance);
+        if (result.chartPath !== undefined) {
+          chartPaths.push(result.chartPath);
+        }
+        fileOutcomes.push({ file: basename(csvPath), outcome: result.outcome });
+      }
+
+      printMultiFileSummary(fileOutcomes);
+
+      const openCharts = options.charts === true || options.losers === true;
+      if (openCharts && chartPaths.length > 0) {
+        const toOpen = options.losers === true
+          ? chartPaths.filter((_, i) => (fileOutcomes[i]?.outcome.report.losers ?? 0) > 0)
+          : chartPaths;
+        for (const p of toOpen) {
+          execSync(`open "${p}"`);
+        }
+      }
+      return;
+    }
+
+    await this.runSingle(options, balance);
+  }
+
+  // ---- helpers ----
+
+  private async runSingle(
+    options: FrankfurtOptions,
+    balance: number,
+  ): Promise<{ chartPath: string | undefined; outcome: BacktestOutcome }> {
+    const source = options.source ?? 'mt5';
 
     let dataRequest: Parameters<BacktestRunnerService['run']>[0]['data'];
     let symbolLabel: string;
@@ -60,7 +133,7 @@ export class BacktestFrankfurtCommand extends CommandRunner {
         console.log(`Missing ${csvPath}.`);
         console.log('Export FDAX/GER40 1m from MT5 and drop the file there.');
         console.log('Or run with --source yahoo for the last 7 days from Yahoo Finance.');
-        return;
+        return { chartPath: undefined, outcome: undefined as never };
       }
       console.log(`Loading ${csvPath} …`);
       dataRequest = {
@@ -104,67 +177,64 @@ export class BacktestFrankfurtCommand extends CommandRunner {
     console.log(`\n→ wrote ${summaryPath}`);
 
     const trades = outcome.trades;
-    if (trades.length === 0) {
-      console.log('\nNo closed trades — nothing to visualise.');
-      return;
-    }
-    if (options.charts !== true) {
-      console.log('\nPass --charts to render the HTML chart audits.');
-      return;
+    if (options.charts !== true && options.losers !== true) {
+      if (trades.length === 0) {
+        console.log('No closed trades — nothing to visualise.');
+      } else {
+        console.log('Pass --charts to render the HTML chart audits.');
+      }
+      return { chartPath: undefined, outcome };
     }
 
     const ibDetector = new InitialBalanceDetector({
       timeframe: '1m',
-      sessionStart: '08:00',
+      sessionStart: '06:00',
       sessionTz: 'UTC',
       durationMinutes: 60,
     });
 
-    const lastTrade = trades[trades.length - 1];
-    const dayStart = Math.floor(lastTrade.entryTime / DAY_MS) * DAY_MS;
-    const dayEnd = dayStart + DAY_MS;
-    const ibs = ibDetector.detect(candles.between(dayStart, dayEnd));
+    const overviewStart = span?.fromMs ?? 0;
+    const overviewEnd = span?.toMs ?? 0;
+    const ibs = ibDetector.detect(candles);
 
-    const chartPath = join(this.reports.ensureDir(), 'frankfurt_ib_50_chart.html');
+    const dateTag = new Date(overviewStart).toISOString().slice(0, 10);
+    const chartPath = join(this.reports.ensureDir(), `frankfurt_ib_50_chart_${dateTag}.html`);
     renderChart({
       context: outcome.context,
       timeframe: '1m',
       patterns: ibs,
-      trades: [lastTrade],
-      startMs: dayStart,
-      endMs: dayEnd,
-      title: `${symbolLabel} 1m — ${new Date(dayStart).toISOString().slice(0, 10)} — ${outcome.strategy.name}`,
+      trades,
+      startMs: overviewStart,
+      endMs: overviewEnd,
+      title: `${symbolLabel} 1m — ${dateTag} — ${outcome.strategy.name}`,
       savePath: chartPath,
     });
-    console.log(`\n→ wrote ${chartPath}`);
+    console.log(`→ wrote ${chartPath}`);
 
-    trades.forEach((trade, i) => {
-      const tradeDayStart = Math.floor(trade.entryTime / DAY_MS) * DAY_MS;
-      const tradeDayEnd = tradeDayStart + DAY_MS;
-      const tradeIbs = ibDetector.detect(candles.between(tradeDayStart, tradeDayEnd));
+    if (trades.length > 0) {
+      trades.forEach((trade, i) => {
+        const tradeDayStart = Math.floor(trade.entryTime / DAY_MS) * DAY_MS;
+        const tradeDayEnd = tradeDayStart + DAY_MS;
+        const tradeIbs = ibDetector.detect(candles.between(tradeDayStart, tradeDayEnd));
 
-      // Show 2 h before entry → 1 h after exit (or entry + 3 h minimum).
-      const viewStart = trade.entryTime - 2 * 3_600_000;
-      const viewEnd = Math.max(
-        (trade.exitTime ?? trade.entryTime) + 3_600_000,
-        trade.entryTime + 3 * 3_600_000,
-      );
-
-      const filename = ReportService.tradeFilename('frankfurt_ib_50', i + 1, trade, 2);
-      renderChart({
-        context: outcome.context,
-        timeframe: '1m',
-        patterns: tradeIbs,
-        trades: [trade],
-        startMs: viewStart,
-        endMs: viewEnd,
-        title: `${symbolLabel} — ${new Date(tradeDayStart).toISOString().slice(0, 10)} — ${trade.signal.direction.toUpperCase()} → ${trade.exitReason ?? 'open'}`,
-        savePath: join(this.reports.reportsDir, filename),
+        const filename = ReportService.tradeFilename('frankfurt_ib_50', i + 1, trade, 2);
+        renderChart({
+          context: outcome.context,
+          timeframe: '1m',
+          patterns: tradeIbs,
+          trades: [trade],
+          startMs: tradeDayStart,
+          endMs: tradeDayEnd,
+          title: `${symbolLabel} — ${new Date(tradeDayStart).toISOString().slice(0, 10)} — ${trade.signal.direction.toUpperCase()} → ${trade.exitReason ?? 'open'}`,
+          savePath: join(this.reports.reportsDir, filename),
+        });
       });
-    });
-    console.log(
-      `→ wrote ${trades.length} trade audits to ${this.reports.reportsDir}/frankfurt_ib_50_trade_*.html`,
-    );
+      console.log(
+        `→ wrote ${trades.length} trade audits to ${this.reports.reportsDir}/frankfurt_ib_50_trade_*.html`,
+      );
+    }
+
+    return { chartPath, outcome };
   }
 
   @Option({
@@ -181,13 +251,33 @@ export class BacktestFrankfurtCommand extends CommandRunner {
     return value;
   }
 
+  @Option({ flags: '--dir <path>', description: 'Run one backtest per CSV in this directory (default data/)' })
+  parseDir(value: string): string {
+    return value;
+  }
+
+  @Option({ flags: '--from <date>', description: 'Skip files before this date (YYYY-MM-DD)' })
+  parseFrom(value: string): string {
+    return value;
+  }
+
+  @Option({ flags: '--to <date>', description: 'Skip files after this date (YYYY-MM-DD)' })
+  parseTo(value: string): string {
+    return value;
+  }
+
   @Option({ flags: '--tz <zone>', description: 'MT5 broker timezone (default Europe/Berlin)' })
   parseTz(value: string): string {
     return value;
   }
 
-  @Option({ flags: '--charts', description: 'Also render HTML chart audits' })
+  @Option({ flags: '--charts', description: 'Render and open HTML chart audits for all days' })
   parseCharts(): boolean {
+    return true;
+  }
+
+  @Option({ flags: '--losers', description: 'Render charts and open only losing days' })
+  parseLosers(): boolean {
     return true;
   }
 
@@ -195,4 +285,103 @@ export class BacktestFrankfurtCommand extends CommandRunner {
   parseBalance(value: string): number {
     return Number.parseFloat(value);
   }
+}
+
+function printMultiFileSummary(
+  rows: Array<{ file: string; outcome: BacktestOutcome }>,
+): void {
+  if (rows.length === 0) return;
+
+  const initialBalance = rows[0]?.outcome.finalBalance / (1 + rows[0]?.outcome.report.totalPnlPct) || 0;
+  const usd = (pct: number) => {
+    const val = initialBalance * pct;
+    return `${val >= 0 ? '+' : ''}$${Math.round(Math.abs(val)).toLocaleString('en-US')}`;
+  };
+
+  const col = {
+    date: 10,
+    bars: 5,
+    trades: 6,
+    wl: 7,
+    wr: 7,
+    pnl: 9,
+    usd: 10,
+    dd: 8,
+    pf: 7,
+  };
+
+  const pad = (s: string, w: number) => s.padStart(w);
+  const header = [
+    'Date'.padEnd(col.date),
+    pad('Bars', col.bars),
+    pad('Trades', col.trades),
+    pad('W / L', col.wl),
+    pad('WinR', col.wr),
+    pad('PnL%', col.pnl),
+    pad('PnL $', col.usd),
+    pad('MaxDD', col.dd),
+    pad('PF', col.pf),
+  ].join('  ');
+  const divider = '-'.repeat(header.length);
+
+  console.log('\n\n=== Multi-file summary ===');
+  console.log(divider);
+  console.log(header);
+  console.log(divider);
+
+  let totalTrades = 0;
+  let totalWinners = 0;
+  let totalLosers = 0;
+  let sumPnl = 0;
+  let maxDd = 0;
+  let sumPf = 0;
+  let pfCount = 0;
+
+  for (const { file, outcome } of rows) {
+    const r: BacktestReport = outcome.report;
+    const candles = outcome.context.candles('1m');
+    const span = BacktestRunnerService.span(candles);
+    const dateTag = span ? new Date(span.fromMs).toISOString().slice(0, 10) : file.slice(0, 10);
+
+    const line = [
+      dateTag.padEnd(col.date),
+      pad(String(candles.length), col.bars),
+      pad(String(r.totalTrades), col.trades),
+      pad(`${r.winners} / ${r.losers}`, col.wl),
+      pad(r.totalTrades > 0 ? percent1(r.winRate) : '—', col.wr),
+      pad(r.totalTrades > 0 ? signedPercent2(r.totalPnlPct) : '—', col.pnl),
+      pad(r.totalTrades > 0 ? usd(r.totalPnlPct) : '—', col.usd),
+      pad(r.totalTrades > 0 ? percent2(r.maxDrawdownPct) : '—', col.dd),
+      pad(r.totalTrades > 0 ? profitFactor(r.profitFactor) : '—', col.pf),
+    ].join('  ');
+    console.log(line);
+
+    totalTrades += r.totalTrades;
+    totalWinners += r.winners;
+    totalLosers += r.losers;
+    sumPnl += r.totalPnlPct;
+    maxDd = Math.max(maxDd, r.maxDrawdownPct);
+    if (Number.isFinite(r.profitFactor) && r.totalTrades > 0) {
+      sumPf += r.profitFactor;
+      pfCount += 1;
+    }
+  }
+
+  const avgWr = totalTrades > 0 ? totalWinners / totalTrades : 0;
+  const avgPf = pfCount > 0 ? sumPf / pfCount : 0;
+
+  console.log(divider);
+  const total = [
+    'TOTAL'.padEnd(col.date),
+    pad('', col.bars),
+    pad(String(totalTrades), col.trades),
+    pad(`${totalWinners} / ${totalLosers}`, col.wl),
+    pad(totalTrades > 0 ? percent1(avgWr) : '—', col.wr),
+    pad(totalTrades > 0 ? signedPercent2(sumPnl) : '—', col.pnl),
+    pad(totalTrades > 0 ? usd(sumPnl) : '—', col.usd),
+    pad(totalTrades > 0 ? percent2(maxDd) : '—', col.dd),
+    pad(totalTrades > 0 ? profitFactor(avgPf) : '—', col.pf),
+  ].join('  ');
+  console.log(total);
+  console.log(divider);
 }

@@ -86,11 +86,14 @@ export function parseMt5Csv(text: string, options: Mt5LoadOptions = {}): Mt5Load
     .map((name) => name.trim().replace(/^<|>$/g, '').toLowerCase());
 
   const column = (name: string): number => header.indexOf(name);
+
+  // ISO-timestamp format: first column is a combined UTC timestamp like
+  // "2026-07-01T08:00:00+00:00", rest are Open/High/Low/Close/Volume.
+  const firstDataCell = lines[1]?.split(separator)[0]?.trim() ?? '';
   if (column('date') < 0 || column('time') < 0) {
-    // Deliberately reports the shape, not the content: this message travels
-    // out through the HTTP API, and the file being parsed is named by the
-    // caller — echoing its first line back would turn a parse failure into a
-    // file-disclosure primitive.
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(firstDataCell)) {
+      return parseIsoCsv(lines, separator, header);
+    }
     throw new Error(`Missing DATE/TIME columns in the MT5 export (found ${header.length} columns)`);
   }
   for (const name of REQUIRED) {
@@ -203,6 +206,56 @@ function parseWallTime(date: string, time: string): number {
     Number(clock[2]),
     clock[3] === undefined ? 0 : Number(clock[3]),
   );
+}
+
+/**
+ * Parse a CSV whose first column is a combined ISO-8601 UTC timestamp:
+ *
+ *   Etc/UTC,Open,High,Low,Close,Volume
+ *   2026-07-01T08:00:00+00:00,25012.8,25022.1,...
+ *
+ * Timestamps are taken as-is (already UTC), so no timezone conversion is
+ * needed and no ambiguous-hour handling applies.
+ */
+function parseIsoCsv(lines: string[], separator: string, header: string[]): Mt5LoadResult {
+  const col = (name: string) => header.indexOf(name);
+  const openCol = col('open');
+  const highCol = col('high');
+  const lowCol = col('low');
+  const closeCol = col('close');
+  const volumeCol = col('volume') >= 0 ? col('volume') : col('tickvol') >= 0 ? col('tickvol') : col('vol');
+
+  if (openCol < 0 || highCol < 0 || lowCol < 0 || closeCol < 0) {
+    throw new Error('Missing OHLC columns in ISO-timestamp CSV');
+  }
+
+  const bars: BarTuple[] = [];
+  for (let i = 1; i < lines.length; i++) {
+    const fields = lines[i].split(separator);
+    const ts = Date.parse(fields[0]?.trim() ?? '');
+    if (isNaN(ts)) continue;
+    bars.push([
+      ts,
+      Number(fields[openCol]),
+      Number(fields[highCol]),
+      Number(fields[lowCol]),
+      Number(fields[closeCol]),
+      volumeCol >= 0 ? Number(fields[volumeCol]) : 0,
+    ]);
+  }
+
+  bars.sort((a, b) => a[0] - b[0]);
+
+  const rows: Mt5Row[] = bars.map(([timestamp, open, high, low, close, volume]) => ({
+    timestamp,
+    open,
+    high,
+    low,
+    close,
+    volume,
+  }));
+
+  return { rows, series: CandleSeries.fromBars(bars), ambiguousRows: 0 };
 }
 
 /** Rough UTC span of the file, used to size the offset table. */

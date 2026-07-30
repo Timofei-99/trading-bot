@@ -63,9 +63,14 @@ export function renderChart(options: RenderChartOptions): PlotlyFigure {
     drawTradeMarker(builder, trade, x0, x1);
   }
 
+  const defaults = style.layoutDefaults();
   builder.setLayout({
-    ...style.layoutDefaults(),
+    ...defaults,
     title: options.title || `${options.context.symbol} — ${options.timeframe}`,
+    xaxis: {
+      ...(defaults.xaxis as object),
+      range: [PlotlyFigureBuilder.time(x0), PlotlyFigureBuilder.time(x1)],
+    },
   });
 
   const figure = builder.build();
