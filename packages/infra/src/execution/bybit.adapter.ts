@@ -17,6 +17,13 @@ import { assertTradeable, baseCurrency, quoteCurrency } from './venue-limits';
 
 export interface BybitAdapterOptions {
   readonly symbol: string;
+  /**
+   * Product line. Spot holds coins and cannot short; linear holds a position
+   * object, can short, and closes with reduce-only orders. The adapter needs
+   * to know which one it is talking to because position accounting — not just
+   * order routing — differs between them.
+   */
+  readonly category?: 'spot' | 'linear';
   readonly riskPerTrade?: number;
   /** Taker fee per side, for sizing headroom and PnL bookkeeping. */
   readonly feeRate?: number;
@@ -57,6 +64,7 @@ export class BybitAdapter implements LiveExecutionPort {
   readonly feeRate: number;
   readonly entryTimeoutMs: number;
   readonly quoteCurrency: string;
+  readonly category: 'spot' | 'linear';
 
   private readonly journal: TradeJournalPort | undefined;
   private readonly log: (line: string) => void;
@@ -80,6 +88,7 @@ export class BybitAdapter implements LiveExecutionPort {
     this.feeRate = options.feeRate ?? 0.001;
     this.entryTimeoutMs = options.entryTimeoutMs ?? 60 * 60_000;
     this.quoteCurrency = options.quoteCurrency ?? quoteCurrency(options.symbol);
+    this.category = options.category ?? 'spot';
     this.journal = options.journal;
     this.log = options.log ?? (() => undefined);
     this.maxRetries = options.maxRetries ?? 3;
@@ -210,7 +219,7 @@ export class BybitAdapter implements LiveExecutionPort {
     if (this.resting !== null || this.position !== null) {
       throw new Error(`Already engaged on ${this.symbol}: one position per symbol`);
     }
-    if (signal.direction !== Direction.Long) {
+    if (this.category === 'spot' && signal.direction !== Direction.Long) {
       // Spot cannot short; a short signal must not be silently turned into a sell.
       throw new Error(
         'Spot trading supports long entries only; configure a linear market to short',
@@ -228,6 +237,9 @@ export class BybitAdapter implements LiveExecutionPort {
     this.cachedBalance = free;
 
     const risked = (free * this.riskPerTrade) / Math.abs(entry - stopLoss);
+    // Spot: cannot buy more than the wallet holds, fees included. Linear: the
+    // same formula is the leverage-1 margin bound — deliberately conservative,
+    // since this adapter never requests leverage.
     const affordable = free / (entry * (1 + this.feeRate));
     const amount = this.client.amountToPrecision(this.symbol, Math.min(risked, affordable));
 
@@ -258,7 +270,7 @@ export class BybitAdapter implements LiveExecutionPort {
     const placed = await this.retry('placeLimitOrder', () =>
       this.client.placeLimitOrder({
         symbol: this.symbol,
-        side: 'buy',
+        side: signal.direction === Direction.Long ? 'buy' : 'sell',
         amount,
         price: entry,
         clientOrderId: orderId,
@@ -382,8 +394,10 @@ export class BybitAdapter implements LiveExecutionPort {
     const { candle } = snapshot;
     const { takeProfit, stopLoss } = trade.signal;
 
-    const hitTakeProfit = candle.high >= takeProfit;
-    const hitStopLoss = candle.low <= stopLoss;
+    // A long's target is above and stop below; a short's are mirrored.
+    const long = trade.signal.direction === Direction.Long;
+    const hitTakeProfit = long ? candle.high >= takeProfit : candle.low <= takeProfit;
+    const hitStopLoss = long ? candle.low <= stopLoss : candle.high >= stopLoss;
     if (!hitTakeProfit && !hitStopLoss) {
       const expiry = trade.signal.expiryTime;
       if (expiry !== null && candle.time >= expiry) {
@@ -439,16 +453,20 @@ export class BybitAdapter implements LiveExecutionPort {
       await this.retry('cancelOrder', () => this.client.cancelOrder(this.symbol, order.id));
     }
 
-    const sold = await this.retry('placeMarketOrder', () =>
+    // Closing a long sells; closing a short buys back. On linear the close is
+    // reduce-only, so a stale size can never overshoot into an opposite
+    // position — the venue caps it at flat.
+    const closing = await this.retry('placeMarketOrder', () =>
       this.client.placeMarketOrder(
         this.symbol,
-        'sell',
+        trade.signal.direction === Direction.Long ? 'sell' : 'buy',
         trade.positionSize,
         exitOrderId(trade.orderId),
+        this.category === 'linear' ? true : undefined,
       ),
     );
-    const price = sold.average ?? sold.price ?? trade.entryPrice;
-    return this.book(trade, price, sold.timestamp ?? Date.now(), reason);
+    const price = closing.average ?? closing.price ?? trade.entryPrice;
+    return this.book(trade, price, closing.timestamp ?? Date.now(), reason);
   }
 
   // -------------------------------------------------------------------------
@@ -552,6 +570,10 @@ export class BybitAdapter implements LiveExecutionPort {
     if (this.position === null) {
       return;
     }
+    if (this.category === 'linear') {
+      await this.reconcileLinearPosition(open);
+      return;
+    }
 
     const base = baseCurrency(this.symbol);
     const total = await this.retry('fetchTotalBalance', () => this.client.fetchTotalBalance(base));
@@ -579,6 +601,50 @@ export class BybitAdapter implements LiveExecutionPort {
         'or sold around the bot — nothing here can account for that. Reconcile the account ' +
         'by hand and start again.',
     );
+  }
+
+  /**
+   * The linear counterpart: the venue HAS a position object, so ask for it
+   * instead of counting coins.
+   *
+   * Same three-way split as spot, with one difference in what counts as a
+   * mismatch: side and size are compared directly, because a linear position
+   * that exists but points the other way — or has been partially closed
+   * around the bot — is exactly as unaccountable as missing coins under
+   * resting legs.
+   */
+  private async reconcileLinearPosition(open: readonly ExchangeOrder[]): Promise<void> {
+    const trade = this.position as Trade;
+    const wantSide = trade.signal.direction === Direction.Long ? 'long' : 'short';
+    const venuePosition = await this.retry('fetchPosition', () =>
+      this.client.fetchPosition(this.symbol),
+    );
+
+    if (venuePosition === null) {
+      if (open.length === 0) {
+        this.log(
+          `reconciled: position ${trade.orderId} appears CLOSED at the venue; ` +
+            'catch-up settlement will book the exit from the missed bars',
+        );
+        return;
+      }
+      throw new Error(
+        `Refusing to start: the journal holds an open ${wantSide} on ${this.symbol} but the ` +
+          'venue reports no position while orders still rest on the symbol. The position was ' +
+          'closed around the bot; reconcile the account by hand and start again.',
+      );
+    }
+
+    const shortBy = trade.positionSize - this.requireMarket().amountStep;
+    if (venuePosition.side !== wantSide || venuePosition.size < shortBy) {
+      throw new Error(
+        `Refusing to start: the journal holds a ${wantSide} of ${trade.positionSize} on ` +
+          `${this.symbol} but the venue reports a ${venuePosition.side} of ${venuePosition.size}. ` +
+          'The position was traded around the bot; reconcile the account by hand and start again.',
+      );
+    }
+
+    this.log(`reconciled: ${venuePosition.side} ${venuePosition.size} confirmed by the venue`);
   }
 
   private requireMarket(): MarketSpec {
@@ -620,7 +686,9 @@ export class BybitAdapter implements LiveExecutionPort {
     trade.exitReason = reason;
     this.closed.push(trade);
 
-    const dollarPnl = trade.positionSize * (price - trade.entryPrice);
+    const long = trade.signal.direction === Direction.Long;
+    const dollarPnl =
+      trade.positionSize * (long ? price - trade.entryPrice : trade.entryPrice - price);
     this.cachedBalance +=
       dollarPnl - trade.positionSize * (trade.entryPrice + price) * this.feeRate;
 

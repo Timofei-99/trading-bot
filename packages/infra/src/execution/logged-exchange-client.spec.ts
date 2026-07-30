@@ -41,6 +41,7 @@ function stub(over: Partial<ExchangeClient> = {}): ExchangeClient {
     fetchOpenOrders: async () => [ORDER],
     fetchFreeBalance: async () => 1000,
     fetchTotalBalance: async () => 1500,
+    fetchPosition: async () => null,
     fetchServerTime: async () => 1_700_000_000_000,
     ...over,
   };

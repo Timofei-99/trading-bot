@@ -18,6 +18,7 @@ const calls: Recorded[] = [];
 let sandboxCalls: boolean[] = [];
 let nextOrder: Record<string, unknown> = {};
 let nextOpenOrders: Record<string, unknown>[] = [];
+let nextPosition: Record<string, unknown> | null = null;
 let constructed: unknown[] = [];
 
 class FakeExchange {
@@ -62,6 +63,10 @@ class FakeExchange {
     calls.push({ method: 'fetchBalance', args });
     return { free: { USDT: 1234.5 }, total: { USDT: 2000, BTC: 0.5 } };
   }
+  async fetchPosition(...args: unknown[]) {
+    calls.push({ method: 'fetchPosition', args });
+    return nextPosition;
+  }
   async fetchTime() {
     calls.push({ method: 'fetchTime', args: [] });
     return 1_700_000_000_000;
@@ -79,6 +84,7 @@ beforeEach(() => {
   constructed = [];
   nextOrder = {};
   nextOpenOrders = [];
+  nextPosition = null;
 });
 
 const argsOf = (method: string): unknown[] =>
@@ -155,6 +161,21 @@ describe('placing orders', () => {
 
     const params = argsOf('createOrder')[5] as Record<string, unknown>;
     expect(params.orderLinkId).toBe('bot-deadbeef-x');
+    // Not asked for, not sent: Bybit spot rejects the flag outright.
+    expect(params).not.toHaveProperty('reduceOnly');
+  });
+
+  it('marks a close reduce-only when asked', async () => {
+    await client({ category: 'linear' }).placeMarketOrder(
+      'BTC/USDT:USDT',
+      'buy',
+      0.5,
+      'bot-1-x',
+      true,
+    );
+
+    const params = argsOf('createOrder')[5] as Record<string, unknown>;
+    expect(params.reduceOnly).toBe(true);
   });
 
   it('attaches the exits to the order so they live at the venue', async () => {
@@ -314,6 +335,25 @@ describe('market data', () => {
 
   it('reports zero total for a currency the account does not hold', async () => {
     expect(await client().fetchTotalBalance('DOGE')).toBe(0);
+  });
+
+  it('normalizes a linear position to side and size', async () => {
+    nextPosition = { contracts: 0.5, side: 'long', unrealizedPnl: 12 };
+
+    expect(await client({ category: 'linear' }).fetchPosition('BTC/USDT:USDT')).toEqual({
+      side: 'long',
+      size: 0.5,
+    });
+  });
+
+  it.each([
+    ['a flat account', null],
+    ['zero contracts', { contracts: 0, side: 'long' }],
+    ['a side ccxt did not map', { contracts: 0.5, side: undefined }],
+  ])('reports no position for %s', async (_name, raw) => {
+    nextPosition = raw as never;
+
+    expect(await client({ category: 'linear' }).fetchPosition('BTC/USDT:USDT')).toBeNull();
   });
 
   it('reads the venue clock', async () => {

@@ -4,6 +4,7 @@ import {
   ExchangeOrder,
   MarketSpec,
   PlaceLimitOrderRequest,
+  VenuePosition,
 } from './exchange-client';
 
 /**
@@ -44,9 +45,12 @@ export class LoggedExchangeClient implements ExchangeClient {
     side: 'buy' | 'sell',
     amount: number,
     clientOrderId: string,
+    reduceOnly?: boolean,
   ): Promise<ExchangeOrder> {
-    return this.record('placeMarketOrder', { symbol, side, amount, clientOrderId }, () =>
-      this.inner.placeMarketOrder(symbol, side, amount, clientOrderId),
+    return this.record(
+      'placeMarketOrder',
+      { symbol, side, amount, clientOrderId, reduceOnly },
+      () => this.inner.placeMarketOrder(symbol, side, amount, clientOrderId, reduceOnly),
     );
   }
 
@@ -66,6 +70,10 @@ export class LoggedExchangeClient implements ExchangeClient {
     return this.record('fetchFreeBalance', { currency }, () =>
       this.inner.fetchFreeBalance(currency),
     );
+  }
+
+  async fetchPosition(symbol: string): Promise<VenuePosition | null> {
+    return this.record('fetchPosition', { symbol }, () => this.inner.fetchPosition(symbol));
   }
 
   async fetchTotalBalance(currency: string): Promise<number> {
