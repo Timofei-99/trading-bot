@@ -1,9 +1,11 @@
 import { createInterface } from 'node:readline/promises';
 import { join } from 'node:path';
 
+import { Inject } from '@nestjs/common';
 import { Command, CommandRunner, Option } from 'nest-commander';
 
 import { StrategyRegistryService } from '@bot/app/strategy-registry.service';
+import { MARKET_DATA_FACTORY, MarketDataFactory } from './market-data.factory';
 import { KillSwitch } from '@bot/core/domain/kill-switch';
 import { RiskManager } from '@bot/core/domain/risk-manager';
 import { LiveEngine } from '@bot/core/engine/live.engine';
@@ -13,7 +15,6 @@ import { describeCredentials, loadExchangeCredentials } from '@bot/infra/config/
 import { BybitAdapter } from '@bot/infra/execution/bybit.adapter';
 import { CcxtExchangeClient } from '@bot/infra/execution/exchange-client';
 import { NdjsonTradeJournal } from '@bot/infra/journal/ndjson-trade-journal';
-import { CcxtCandleRepository } from '@bot/infra/market-data/ccxt-candle.repository';
 
 interface TradeOptions {
   strategy?: string;
@@ -41,7 +42,10 @@ interface TradeOptions {
   description: 'Run a strategy against Bybit (testnet by default; --live needs BYBIT_LIVE too)',
 })
 export class TradeCommand extends CommandRunner {
-  constructor(private readonly registry: StrategyRegistryService) {
+  constructor(
+    private readonly registry: StrategyRegistryService,
+    @Inject(MARKET_DATA_FACTORY) private readonly marketData: MarketDataFactory,
+  ) {
     super();
   }
 
@@ -108,7 +112,7 @@ export class TradeCommand extends CommandRunner {
     await adapter.start(Date.now());
 
     const engine = new LiveEngine(
-      new CcxtCandleRepository({ exchangeId: credentials.exchangeId }),
+      this.marketData.forExchange(credentials.exchangeId),
       strategy,
       adapter,
       {

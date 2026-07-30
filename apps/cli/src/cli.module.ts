@@ -6,6 +6,7 @@ import { BacktestFrankfurtCommand } from './backtest-frankfurt.command';
 import { BacktestH1m3mCommand } from './backtest-h1-3m.command';
 import { BacktestOb4hCommand } from './backtest-ob4h.command';
 import { HaltCommand, ResumeCommand } from './halt.command';
+import { CcxtMarketDataFactory, MARKET_DATA_FACTORY } from './market-data.factory';
 import { PaperCommand } from './paper.command';
 import { StrategiesCommand } from './strategies.command';
 import { TradeCommand } from './trade.command';
@@ -16,6 +17,7 @@ import { VisualizeCommand } from './visualize.command';
 @Module({
   imports: [ApplicationModule],
   providers: [
+    { provide: MARKET_DATA_FACTORY, useClass: CcxtMarketDataFactory },
     VersionCommand,
     StrategiesCommand,
     BacktestCommand,

@@ -46,15 +46,15 @@ module.exports = {
   // higher bar than the shells around it, deliberately: a wrong detector is
   // silent and expensive, a wrong CLI flag is loud and cheap.
   coverageThreshold: {
-    global: { statements: 58, branches: 40, functions: 56, lines: 58 },
+    global: { statements: 75, branches: 55, functions: 75, lines: 75 },
     './packages/core/src/domain/': { statements: 97, branches: 90, functions: 95, lines: 97 },
     './packages/core/src/detectors/': { statements: 98, branches: 95, functions: 92, lines: 98 },
     './packages/core/src/engine/': { statements: 88, branches: 80, functions: 80, lines: 88 },
     './packages/core/src/execution/': { statements: 97, branches: 88, functions: 100, lines: 97 },
-    // Low, and locked in at that. The commands are still mostly untested; this
-    // floor exists so the little that is covered cannot quietly go away while
-    // the rest is being worked through.
-    './apps/cli/src/': { statements: 13, branches: 8, functions: 18, lines: 13 },
+    // The commands, tested through their run() methods against stub services
+    // and a temp-dir journal. `visualize` and cli.module are still uncovered;
+    // everything else is real.
+    './apps/cli/src/': { statements: 74, branches: 53, functions: 77, lines: 75 },
     // The layer that actually talks to the venue. Was 0% on both clients
     // before the restart-safety work; holding the line matters more here than
     // anywhere except the domain.

@@ -1,14 +1,15 @@
 import { join } from 'node:path';
 
+import { Inject } from '@nestjs/common';
 import { Command, CommandRunner, Option } from 'nest-commander';
 
 import { StrategyRegistryService } from '@bot/app/strategy-registry.service';
+import { MARKET_DATA_FACTORY, MarketDataFactory } from './market-data.factory';
 import { KillSwitch } from '@bot/core/domain/kill-switch';
 import { RiskManager } from '@bot/core/domain/risk-manager';
 import { Trade } from '@bot/core/domain/trade';
 import { LiveEngine } from '@bot/core/engine/live.engine';
 import { PaperAdapter } from '@bot/core/execution/paper.adapter';
-import { CcxtCandleRepository } from '@bot/infra/market-data/ccxt-candle.repository';
 import { NdjsonTradeJournal } from '@bot/infra/journal/ndjson-trade-journal';
 
 interface PaperOptions {
@@ -42,7 +43,10 @@ interface PaperOptions {
   description: 'Run a strategy on live exchange data with simulated fills (no keys, no money)',
 })
 export class PaperCommand extends CommandRunner {
-  constructor(private readonly registry: StrategyRegistryService) {
+  constructor(
+    private readonly registry: StrategyRegistryService,
+    @Inject(MARKET_DATA_FACTORY) private readonly marketData: MarketDataFactory,
+  ) {
     super();
   }
 
@@ -84,30 +88,25 @@ export class PaperCommand extends CommandRunner {
       await this.printState(adapter, symbol);
     }
 
-    const engine = new LiveEngine(
-      new CcxtCandleRepository({ exchangeId: exchange }),
-      strategy,
-      adapter,
-      {
-        symbol,
-        timeframes,
-        baseTimeframe,
-        window: 500,
-        riskManager:
-          options.maxDailyDd === undefined
-            ? undefined
-            : new RiskManager(options.risk ?? 0.01, options.maxDailyDd),
-        killSwitch:
-          options.maxDailyDd === undefined && options.maxLosses === undefined
-            ? undefined
-            : new KillSwitch({
-                maxDailyDrawdown: options.maxDailyDd,
-                maxConsecutiveLosses: options.maxLosses,
-              }),
-        journal,
-        log: (line) => console.log(`[${new Date().toISOString()}] ${line}`),
-      },
-    );
+    const engine = new LiveEngine(this.marketData.forExchange(exchange), strategy, adapter, {
+      symbol,
+      timeframes,
+      baseTimeframe,
+      window: 500,
+      riskManager:
+        options.maxDailyDd === undefined
+          ? undefined
+          : new RiskManager(options.risk ?? 0.01, options.maxDailyDd),
+      killSwitch:
+        options.maxDailyDd === undefined && options.maxLosses === undefined
+          ? undefined
+          : new KillSwitch({
+              maxDailyDrawdown: options.maxDailyDd,
+              maxConsecutiveLosses: options.maxLosses,
+            }),
+      journal,
+      log: (line) => console.log(`[${new Date().toISOString()}] ${line}`),
+    });
 
     if (options.once === true) {
       await engine.warmup(Date.now());
