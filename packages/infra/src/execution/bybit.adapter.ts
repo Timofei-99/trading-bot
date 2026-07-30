@@ -292,17 +292,82 @@ export class BybitAdapter implements LiveExecutionPort {
     return order;
   }
 
+  /**
+   * Withdraw the resting entry — and account for whatever filled first.
+   *
+   * A limit order can PARTIALLY fill before the cancel lands, and cancelling
+   * kills the attached TP/SL along with the order. Recording that as a plain
+   * "cancelled" — which this method used to do — silently strands the filled
+   * part at the venue: coins (or contracts) the journal does not know about,
+   * protected by nothing. So after cancelling, the venue is asked what
+   * actually happened, and the answer splits three ways:
+   *
+   *  - nothing filled: the plain cancel it always was;
+   *  - fully filled (the fill won the race; the cancel itself may even have
+   *    failed for that reason): a normal position whose attached exits went
+   *    live at the venue. Kept — `sync()` takes over from here;
+   *  - partially filled, then cancelled: a stub position with NO exits at
+   *    the venue. It is closed at market immediately, because an unprotected
+   *    position held on purpose is a decision nobody made.
+   */
   async cancelEntry(symbol: string): Promise<EntryOrder | null> {
     if (symbol !== this.symbol || this.resting === null) {
       return null;
     }
     const state = this.resting;
-    if (state.exchangeOrderId !== null) {
+
+    if (state.exchangeOrderId === null) {
+      // Never acknowledged: there is nothing at the venue to cancel or to
+      // have filled. (If the placement actually landed and the reply was
+      // lost, startup reconciliation is what finds it.)
+      this.resting = null;
+      this.settleCancelled(state, symbol);
+      return state.order;
+    }
+
+    try {
       await this.retry('cancelOrder', () =>
         this.client.cancelOrder(this.symbol, state.exchangeOrderId as string),
       );
+    } catch (error) {
+      // A failed cancel is information, not an error: the usual cause is
+      // that the order just finished filling.
+      this.log(`cancelOrder failed (${(error as Error).message}); asking the venue what happened`);
     }
+
+    const venueOrder = await this.retry('fetchOrder', () =>
+      this.client.fetchOrder(this.symbol, state.exchangeOrderId as string),
+    );
     this.resting = null;
+
+    if (venueOrder.filled > 0) {
+      const fillPrice = venueOrder.average ?? venueOrder.price ?? state.order.signal.entry;
+      const fillTime = venueOrder.timestamp ?? Date.now();
+      state.order.status = 'filled';
+      state.order.fillPrice = fillPrice;
+      state.order.fillTime = fillTime;
+      this.openPosition(state.order, fillPrice, fillTime, venueOrder.filled);
+
+      if (venueOrder.status === 'closed') {
+        this.log(
+          `cancel raced with a full fill @ ${fillPrice}; position kept, exits live at the venue`,
+        );
+        return state.order;
+      }
+
+      this.log(
+        `entry ${state.order.orderId} partially filled (${venueOrder.filled}) before the ` +
+          'cancel; closing the unprotected stub at market',
+      );
+      await this.closePosition(this.symbol, 'manual');
+      return state.order;
+    }
+
+    this.settleCancelled(state, symbol);
+    return state.order;
+  }
+
+  private settleCancelled(state: OpenState, symbol: string): void {
     state.order.status = 'cancelled';
     this.record({
       type: 'entry_settled',
@@ -313,7 +378,6 @@ export class BybitAdapter implements LiveExecutionPort {
       fillPrice: null,
       fillTime: null,
     });
-    return state.order;
   }
 
   /**
@@ -364,9 +428,13 @@ export class BybitAdapter implements LiveExecutionPort {
           });
         } else if (nowMs >= state.order.placedAt + this.entryTimeoutMs) {
           await this.cancelEntry(this.symbol);
-          state.order.status = 'expired';
+          // Only a clean cancel is relabelled as the timeout it was; a fill
+          // that won the race keeps saying so.
+          if (state.order.status === 'cancelled') {
+            state.order.status = 'expired';
+            this.log(`entry ${state.order.orderId} timed out, cancelled at the venue`);
+          }
           settledEntries.push(state.order);
-          this.log(`entry ${state.order.orderId} timed out, cancelled at the venue`);
         }
       }
     }

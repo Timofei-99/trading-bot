@@ -190,6 +190,12 @@ class FakeExchange implements ExchangeClient {
     return this.serverTime;
   }
 
+  /** Test helper: mark the resting order as PARTIALLY filled, still open. */
+  partiallyFill(id: string, filled: number, price: number, timeMs: number): void {
+    const order = this.orders.get(id) as ExchangeOrder;
+    this.orders.set(id, { ...order, filled, average: price, timestamp: timeMs });
+  }
+
   /** Test helper: mark the resting order as fully filled. */
   fill(id: string, price: number, timeMs: number): void {
     const order = this.orders.get(id) as ExchangeOrder;
@@ -575,6 +581,81 @@ describe('BybitAdapter', () => {
 
       expect(exchange.marketOrders[0].side).toBe('sell');
       expect(exchange.marketOrders[0].reduceOnly).toBeUndefined();
+    });
+  });
+
+  describe('cancelling an entry that already (partly) filled', () => {
+    async function placeResting(exchange: FakeExchange, adapter: BybitAdapter) {
+      const order = await adapter.placeEntry(makeSignal(100, 95, 110));
+      const venueId = [...exchange.orders.values()].find(
+        (candidate) => candidate.clientOrderId === order.orderId,
+      )!.id;
+      return { order, venueId };
+    }
+
+    it('closes a partial fill at market instead of stranding it', async () => {
+      // Cancelling kills the attached TP/SL along with the order, so the
+      // filled part would sit at the venue protected by nothing and known to
+      // nobody. It is adopted and immediately closed.
+      const exchange = new FakeExchange();
+      const adapter = adapterFor(exchange);
+      await adapter.start(T0);
+      const { venueId } = await placeResting(exchange, adapter);
+      exchange.partiallyFill(venueId, 0.4, 100, bar(1));
+
+      const settled = await adapter.cancelEntry(SYMBOL);
+
+      expect(settled?.status).toBe('filled');
+      expect(exchange.marketOrders).toHaveLength(1);
+      expect(exchange.marketOrders[0]).toMatchObject({ side: 'sell', amount: 0.4 });
+      expect(await adapter.getPosition(SYMBOL)).toBeNull();
+      expect((await adapter.getClosedTrades()).at(-1)?.exitReason).toBe('manual');
+    });
+
+    it('keeps a position whose fill won the race with the cancel', async () => {
+      // The cancel failing IS the signal: the order finished filling first,
+      // and its attached exits went live at the venue. Nothing to unwind.
+      const exchange = new FakeExchange();
+      const adapter = adapterFor(exchange);
+      await adapter.start(T0);
+      const { venueId } = await placeResting(exchange, adapter);
+      exchange.fill(venueId, 100, bar(1));
+      exchange.failNext.cancelOrder = 10;
+
+      const settled = await adapter.cancelEntry(SYMBOL);
+
+      expect(settled?.status).toBe('filled');
+      expect(await adapter.getPosition(SYMBOL)).not.toBeNull();
+      expect(exchange.marketOrders).toHaveLength(0);
+    });
+
+    it('still cancels cleanly when nothing filled', async () => {
+      const exchange = new FakeExchange();
+      const adapter = adapterFor(exchange);
+      await adapter.start(T0);
+      await placeResting(exchange, adapter);
+
+      const settled = await adapter.cancelEntry(SYMBOL);
+
+      expect(settled?.status).toBe('cancelled');
+      expect(await adapter.getPosition(SYMBOL)).toBeNull();
+      expect(exchange.marketOrders).toHaveLength(0);
+    });
+
+    it('reports a timed-out partial as filled, not expired', async () => {
+      // The timeout path funnels through the same cancel; the outcome that
+      // reaches the engine must say what actually happened to the money.
+      const exchange = new FakeExchange();
+      const adapter = adapterFor(exchange, { entryTimeoutMs: M15 });
+      await adapter.start(T0);
+      const { venueId } = await placeResting(exchange, adapter);
+      exchange.partiallyFill(venueId, 0.4, 100, bar(1));
+
+      const result = await adapter.sync({ symbol: SYMBOL, candle: candle(3, 101, 99) });
+
+      expect(result.settledEntries).toHaveLength(1);
+      expect(result.settledEntries[0].status).toBe('filled');
+      expect((await adapter.getClosedTrades()).at(-1)?.exitReason).toBe('manual');
     });
   });
 
