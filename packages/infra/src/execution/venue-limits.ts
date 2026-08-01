@@ -40,6 +40,20 @@ export function assertTradeable(
 }
 
 /**
+ * The currency a spot position is HELD in once the entry fills.
+ *
+ * `BTC/USDT` -> `BTC`. This is what the position-side reconcile counts at the
+ * venue: on spot there is no position object, only these coins.
+ */
+export function baseCurrency(symbol: string): string {
+  const parts = symbol.split('/');
+  if (parts.length !== 2 || parts[0] === '') {
+    throw new Error(`Cannot read the base currency from ${JSON.stringify(symbol)}`);
+  }
+  return parts[0];
+}
+
+/**
  * The currency an order is priced and funded in.
  *
  * `BTC/USDT` -> `USDT`, and `BTC/USDT:USDT` (a linear perpetual) -> `USDT`:

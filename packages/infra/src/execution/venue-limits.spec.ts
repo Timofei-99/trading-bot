@@ -1,5 +1,5 @@
 import { MarketSpec } from './exchange-client';
-import { assertTradeable, quoteCurrency } from './venue-limits';
+import { assertTradeable, baseCurrency, quoteCurrency } from './venue-limits';
 
 const market = (over: Partial<MarketSpec> = {}): MarketSpec => ({
   priceTick: 0.01,
@@ -78,5 +78,19 @@ describe('quoteCurrency', () => {
 
   it.each(['BTCUSDT', 'BTC/', '', 'BTC/USDT/EXTRA'])('refuses %j', (symbol) => {
     expect(() => quoteCurrency(symbol)).toThrow(/Cannot read the quote currency/);
+  });
+});
+
+describe('baseCurrency', () => {
+  it('reads the currency a spot position is held in', () => {
+    expect(baseCurrency('BTC/USDT')).toBe('BTC');
+  });
+
+  it('is unaffected by a settlement suffix', () => {
+    expect(baseCurrency('BTC/USDT:USDT')).toBe('BTC');
+  });
+
+  it.each(['BTCUSDT', '/USDT', '', 'BTC/USDT/EXTRA'])('refuses %j', (symbol) => {
+    expect(() => baseCurrency(symbol)).toThrow(/Cannot read the base currency/);
   });
 });

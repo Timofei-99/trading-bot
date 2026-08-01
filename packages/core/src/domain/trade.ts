@@ -33,6 +33,12 @@ export class Trade {
   exitTime: number | null = null;
   exitPrice: number | null = null;
   exitReason: ExitReason | null = null;
+  /**
+   * Accumulated funding paid while the position was open, in quote currency.
+   * Positive = paid, negative = received (a short under a positive rate).
+   * Perpetuals only; stays 0 everywhere else.
+   */
+  fundingCost = 0;
 
   constructor(init: TradeInit) {
     this.signal = init.signal;
@@ -59,10 +65,17 @@ export class Trade {
       this.signal.direction === Direction.Long
         ? (this.exitPrice - this.entryPrice) / this.entryPrice
         : (this.entryPrice - this.exitPrice) / this.entryPrice;
-    if (this.feeRate === 0) {
-      return gross;
+    let net = gross;
+    if (this.feeRate !== 0) {
+      net = gross - this.feeRate * (1 + this.exitPrice / this.entryPrice);
     }
-    return gross - this.feeRate * (1 + this.exitPrice / this.entryPrice);
+    if (this.fundingCost !== 0) {
+      // Quote currency, expressed against the entry notional like the fee is.
+      // Guarded so the funding-free path — every parity-pinned run — executes
+      // the exact float operations it always did.
+      net -= this.fundingCost / (this.entryPrice * this.positionSize);
+    }
+    return net;
   }
 
   /** Profit in units of the risk taken (R multiple). */

@@ -53,7 +53,7 @@ class MemoryJournal implements TradeJournalPort {
 class FakeExchange implements ExchangeClient {
   readonly placed: PlaceLimitOrderRequest[] = [];
   readonly cancelled: string[] = [];
-  readonly marketOrders: { side: string; amount: number }[] = [];
+  readonly marketOrders: { side: string; amount: number; reduceOnly?: boolean }[] = [];
   readonly calls: string[] = [];
 
   orders = new Map<string, ExchangeOrder>();
@@ -120,9 +120,11 @@ class FakeExchange implements ExchangeClient {
     symbol: string,
     side: 'buy' | 'sell',
     amount: number,
+    _clientOrderId?: string,
+    reduceOnly?: boolean,
   ): Promise<ExchangeOrder> {
     this.maybeFail('placeMarketOrder');
-    this.marketOrders.push({ side, amount });
+    this.marketOrders.push({ side, amount, reduceOnly });
     return {
       id: `ex-${this.nextId++}`,
       clientOrderId: null,
@@ -162,14 +164,36 @@ class FakeExchange implements ExchangeClient {
     return [...this.openOrders];
   }
 
+  venuePosition: { side: 'long' | 'short'; size: number } | null = null;
+
+  async fetchPosition(): Promise<{ side: 'long' | 'short'; size: number } | null> {
+    this.maybeFail('fetchPosition');
+    return this.venuePosition;
+  }
+
   async fetchFreeBalance(): Promise<number> {
     this.maybeFail('fetchFreeBalance');
     return this.balance;
   }
 
+  /** Per-currency totals; unset currencies fall back to `balance` so the
+   *  existing quote-side tests keep working unchanged. */
+  totals: Record<string, number> = {};
+
+  async fetchTotalBalance(currency: string): Promise<number> {
+    this.maybeFail('fetchTotalBalance');
+    return this.totals[currency] ?? this.balance;
+  }
+
   async fetchServerTime(): Promise<number> {
     this.maybeFail('fetchServerTime');
     return this.serverTime;
+  }
+
+  /** Test helper: mark the resting order as PARTIALLY filled, still open. */
+  partiallyFill(id: string, filled: number, price: number, timeMs: number): void {
+    const order = this.orders.get(id) as ExchangeOrder;
+    this.orders.set(id, { ...order, filled, average: price, timestamp: timeMs });
   }
 
   /** Test helper: mark the resting order as fully filled. */
@@ -411,6 +435,227 @@ describe('BybitAdapter', () => {
       expect(exchange.marketOrders[0]).toMatchObject({ side: 'sell' });
       expect(trade?.exitReason).toBe('strategy');
       expect(trade?.exitPrice).toBe(99);
+    });
+  });
+
+  describe('linear perpetuals', () => {
+    const linearFor = (exchange: FakeExchange) => adapterFor(exchange, { category: 'linear' });
+
+    const shortSignal = (entry = 100, stopLoss = 105, takeProfit = 90): Signal =>
+      new Signal({
+        symbol: SYMBOL,
+        direction: Direction.Short,
+        entry,
+        stopLoss,
+        takeProfit,
+        timeframe: '15m',
+        timestamp: bar(0),
+        strategyName: 'test',
+        strategyVersion: '1',
+      });
+
+    /** Place a short and fill it, returning the adapter mid-position. */
+    async function openShort(exchange: FakeExchange): Promise<BybitAdapter> {
+      const adapter = linearFor(exchange);
+      await adapter.start(T0);
+      const order = await adapter.placeEntry(shortSignal());
+      exchange.fill(
+        [...exchange.orders.values()].find((o) => o.clientOrderId === order.orderId)!.id,
+        100,
+        bar(1),
+      );
+      await adapter.sync({ symbol: SYMBOL, candle: candle(1, 101, 99) });
+      return adapter;
+    }
+
+    it('accepts a short and routes it as a limit SELL with mirrored exits', async () => {
+      const exchange = new FakeExchange();
+      const adapter = linearFor(exchange);
+      await adapter.start(T0);
+
+      await adapter.placeEntry(shortSignal(100, 105, 90));
+
+      expect(exchange.placed[0]).toMatchObject({
+        side: 'sell',
+        price: 100,
+        stopLoss: 105,
+        takeProfit: 90,
+      });
+    });
+
+    it('still refuses a short on spot', async () => {
+      const exchange = new FakeExchange();
+      const adapter = adapterFor(exchange); // default: spot
+      await adapter.start(T0);
+
+      await expect(adapter.placeEntry(shortSignal())).rejects.toThrow(/long entries only/);
+    });
+
+    describe('a short position at the venue', () => {
+      it('books the take-profit when price falls to it', async () => {
+        // Mirrored geometry: the short's target is BELOW entry.
+        const exchange = new FakeExchange();
+        const adapter = await openShort(exchange);
+
+        const [closed] = (await adapter.sync({ symbol: SYMBOL, candle: candle(2, 95, 89) })).closed;
+
+        expect(closed.exitReason).toBe('tp');
+        expect(closed.exitPrice).toBe(90);
+      });
+
+      it('books the stop when price rises to it', async () => {
+        const exchange = new FakeExchange();
+        const adapter = await openShort(exchange);
+
+        const [closed] = (await adapter.sync({ symbol: SYMBOL, candle: candle(2, 106, 101) }))
+          .closed;
+
+        expect(closed.exitReason).toBe('sl');
+        expect(closed.exitPrice).toBe(105);
+      });
+
+      it('still attributes a both-sides bar to the stop', async () => {
+        // The conservative reading is direction-independent.
+        const exchange = new FakeExchange();
+        const adapter = await openShort(exchange);
+
+        const [closed] = (await adapter.sync({ symbol: SYMBOL, candle: candle(2, 106, 89) }))
+          .closed;
+
+        expect(closed.exitReason).toBe('sl');
+      });
+
+      it('gains balance when the short closes below entry', async () => {
+        // The long-only formula would book this winning short as a loss.
+        const exchange = new FakeExchange();
+        const adapter = await openShort(exchange);
+        const before = await adapter.getBalance();
+
+        await adapter.sync({ symbol: SYMBOL, candle: candle(2, 95, 89) });
+
+        expect(await adapter.getBalance()).toBeGreaterThan(before);
+      });
+
+      it('closes a short by BUYING it back, reduce-only', async () => {
+        const exchange = new FakeExchange();
+        const adapter = await openShort(exchange);
+
+        await adapter.closePosition(SYMBOL, 'strategy');
+
+        expect(exchange.marketOrders[0]).toMatchObject({ side: 'buy', reduceOnly: true });
+      });
+    });
+
+    it('closes a linear long with a reduce-only SELL', async () => {
+      const exchange = new FakeExchange();
+      const adapter = linearFor(exchange);
+      await adapter.start(T0);
+      const order = await adapter.placeEntry(makeSignal(100, 95, 110));
+      exchange.fill(
+        [...exchange.orders.values()].find((o) => o.clientOrderId === order.orderId)!.id,
+        100,
+        bar(1),
+      );
+      await adapter.sync({ symbol: SYMBOL, candle: candle(1, 101, 99) });
+
+      await adapter.closePosition(SYMBOL, 'strategy');
+
+      expect(exchange.marketOrders[0]).toMatchObject({ side: 'sell', reduceOnly: true });
+    });
+
+    it('keeps the spot close free of reduce-only', async () => {
+      // Bybit spot rejects the flag; sending it would turn every strategy
+      // exit into an API error.
+      const exchange = new FakeExchange();
+      const adapter = adapterFor(exchange);
+      await adapter.start(T0);
+      const order = await adapter.placeEntry(makeSignal(100, 95, 110));
+      exchange.fill(
+        [...exchange.orders.values()].find((o) => o.clientOrderId === order.orderId)!.id,
+        100,
+        bar(1),
+      );
+      await adapter.sync({ symbol: SYMBOL, candle: candle(1, 101, 99) });
+
+      await adapter.closePosition(SYMBOL, 'strategy');
+
+      expect(exchange.marketOrders[0].side).toBe('sell');
+      expect(exchange.marketOrders[0].reduceOnly).toBeUndefined();
+    });
+  });
+
+  describe('cancelling an entry that already (partly) filled', () => {
+    async function placeResting(exchange: FakeExchange, adapter: BybitAdapter) {
+      const order = await adapter.placeEntry(makeSignal(100, 95, 110));
+      const venueId = [...exchange.orders.values()].find(
+        (candidate) => candidate.clientOrderId === order.orderId,
+      )!.id;
+      return { order, venueId };
+    }
+
+    it('closes a partial fill at market instead of stranding it', async () => {
+      // Cancelling kills the attached TP/SL along with the order, so the
+      // filled part would sit at the venue protected by nothing and known to
+      // nobody. It is adopted and immediately closed.
+      const exchange = new FakeExchange();
+      const adapter = adapterFor(exchange);
+      await adapter.start(T0);
+      const { venueId } = await placeResting(exchange, adapter);
+      exchange.partiallyFill(venueId, 0.4, 100, bar(1));
+
+      const settled = await adapter.cancelEntry(SYMBOL);
+
+      expect(settled?.status).toBe('filled');
+      expect(exchange.marketOrders).toHaveLength(1);
+      expect(exchange.marketOrders[0]).toMatchObject({ side: 'sell', amount: 0.4 });
+      expect(await adapter.getPosition(SYMBOL)).toBeNull();
+      expect((await adapter.getClosedTrades()).at(-1)?.exitReason).toBe('manual');
+    });
+
+    it('keeps a position whose fill won the race with the cancel', async () => {
+      // The cancel failing IS the signal: the order finished filling first,
+      // and its attached exits went live at the venue. Nothing to unwind.
+      const exchange = new FakeExchange();
+      const adapter = adapterFor(exchange);
+      await adapter.start(T0);
+      const { venueId } = await placeResting(exchange, adapter);
+      exchange.fill(venueId, 100, bar(1));
+      exchange.failNext.cancelOrder = 10;
+
+      const settled = await adapter.cancelEntry(SYMBOL);
+
+      expect(settled?.status).toBe('filled');
+      expect(await adapter.getPosition(SYMBOL)).not.toBeNull();
+      expect(exchange.marketOrders).toHaveLength(0);
+    });
+
+    it('still cancels cleanly when nothing filled', async () => {
+      const exchange = new FakeExchange();
+      const adapter = adapterFor(exchange);
+      await adapter.start(T0);
+      await placeResting(exchange, adapter);
+
+      const settled = await adapter.cancelEntry(SYMBOL);
+
+      expect(settled?.status).toBe('cancelled');
+      expect(await adapter.getPosition(SYMBOL)).toBeNull();
+      expect(exchange.marketOrders).toHaveLength(0);
+    });
+
+    it('reports a timed-out partial as filled, not expired', async () => {
+      // The timeout path funnels through the same cancel; the outcome that
+      // reaches the engine must say what actually happened to the money.
+      const exchange = new FakeExchange();
+      const adapter = adapterFor(exchange, { entryTimeoutMs: M15 });
+      await adapter.start(T0);
+      const { venueId } = await placeResting(exchange, adapter);
+      exchange.partiallyFill(venueId, 0.4, 100, bar(1));
+
+      const result = await adapter.sync({ symbol: SYMBOL, candle: candle(3, 101, 99) });
+
+      expect(result.settledEntries).toHaveLength(1);
+      expect(result.settledEntries[0].status).toBe('filled');
+      expect((await adapter.getClosedTrades()).at(-1)?.exitReason).toBe('manual');
     });
   });
 

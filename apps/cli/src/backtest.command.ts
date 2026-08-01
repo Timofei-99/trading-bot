@@ -22,6 +22,7 @@ interface BacktestOptions {
   fee?: number;
   slippage?: number;
   worstCase?: boolean;
+  fundingRate?: number;
   maxDailyDd?: number;
   trades?: boolean;
 }
@@ -100,6 +101,7 @@ export class BacktestCommand extends CommandRunner {
         feeRate: options.fee,
         slippage: options.slippage,
         worstCase: options.worstCase,
+        fundingRatePer8h: options.fundingRate,
         maxDailyDrawdown: options.maxDailyDd,
       },
     });
@@ -211,6 +213,21 @@ export class BacktestCommand extends CommandRunner {
   @Option({ flags: '--worst-case', description: 'Resolve TP+SL bars against the trade' })
   parseWorstCase(): boolean {
     return true;
+  }
+
+  @Option({
+    flags: '--funding-rate <per8h>',
+    description: 'Perpetuals: funding per 8h, e.g. 0.0001; longs pay, shorts receive (default 0)',
+  })
+  parseFundingRate(value: string): number {
+    const parsed = Number.parseFloat(value);
+    // Negative rates are real (shorts pay); only bound the magnitude.
+    if (!Number.isFinite(parsed) || Math.abs(parsed) >= 0.01) {
+      throw new Error(
+        `--funding-rate: expected a per-interval fraction in (-0.01, 0.01), got ${JSON.stringify(value)}`,
+      );
+    }
+    return parsed;
   }
 
   @Option({

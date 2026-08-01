@@ -97,6 +97,7 @@ export class TradeCommand extends CommandRunner {
       ),
       {
         symbol,
+        category: credentials.category,
         riskPerTrade: options.risk ?? 0.01,
         feeRate: options.fee ?? 0.001,
         entryTimeoutMs: (options.entryTimeout ?? 60) * 60_000,

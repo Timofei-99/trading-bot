@@ -48,6 +48,19 @@ export interface PlaceLimitOrderRequest {
   readonly stopLoss?: number;
 }
 
+/**
+ * A derivatives position as the venue reports it.
+ *
+ * Only exists on linear markets. On spot the "position" is a base-currency
+ * balance and this concept does not apply — which is exactly why the two are
+ * reconciled differently.
+ */
+export interface VenuePosition {
+  readonly side: 'long' | 'short';
+  /** Contracts held; the unit ccxt calls `contracts`. */
+  readonly size: number;
+}
+
 export interface ExchangeClient {
   loadMarket(symbol: string): Promise<MarketSpec>;
   /** Round a price DOWN/UP to the venue's tick, per the venue's own rules. */
@@ -55,11 +68,16 @@ export interface ExchangeClient {
   amountToPrecision(symbol: string, amount: number): number;
 
   placeLimitOrder(request: PlaceLimitOrderRequest): Promise<ExchangeOrder>;
+  /**
+   * `reduceOnly` matters on linear only: a market close sized at the position
+   * must shrink it to zero, never overshoot into an opposite position.
+   */
   placeMarketOrder(
     symbol: string,
     side: 'buy' | 'sell',
     amount: number,
     clientOrderId: string,
+    reduceOnly?: boolean,
   ): Promise<ExchangeOrder>;
   cancelOrder(symbol: string, id: string): Promise<void>;
 
@@ -67,6 +85,16 @@ export interface ExchangeClient {
   fetchOpenOrders(symbol: string): Promise<ExchangeOrder[]>;
   /** Free balance of a currency, e.g. the quote currency of the pair. */
   fetchFreeBalance(currency: string): Promise<number>;
+  /** The open position on a linear market, or null when flat. Spot: do not call. */
+  fetchPosition(symbol: string): Promise<VenuePosition | null>;
+  /**
+   * TOTAL balance of a currency: free plus locked in open orders.
+   *
+   * The position-side reconcile needs this and must not use `free`: a healthy
+   * spot position has its base coins LOCKED under the resting exit legs, so
+   * its free balance is near zero precisely when everything is fine.
+   */
+  fetchTotalBalance(currency: string): Promise<number>;
   /** Venue clock, for detecting a skewed local clock before signing requests. */
   fetchServerTime(): Promise<number>;
 }
@@ -147,11 +175,23 @@ export class CcxtExchangeClient implements ExchangeClient {
     side: 'buy' | 'sell',
     amount: number,
     clientOrderId: string,
+    reduceOnly?: boolean,
   ): Promise<ExchangeOrder> {
-    const order = await this.connect().createOrder(symbol, 'market', side, amount, undefined, {
+    const params: Record<string, unknown> = {
       category: this.category,
       orderLinkId: clientOrderId,
-    });
+    };
+    if (reduceOnly === true) {
+      params.reduceOnly = true;
+    }
+    const order = await this.connect().createOrder(
+      symbol,
+      'market',
+      side,
+      amount,
+      undefined,
+      params,
+    );
     return normalize(order);
   }
 
@@ -174,6 +214,24 @@ export class CcxtExchangeClient implements ExchangeClient {
     const balance = await this.connect().fetchBalance({ category: this.category });
     const free = (balance.free ?? {}) as unknown as Record<string, number | undefined>;
     return Number(free[currency] ?? 0);
+  }
+
+  async fetchPosition(symbol: string): Promise<VenuePosition | null> {
+    const raw = (await this.connect().fetchPosition(symbol, { category: this.category })) as {
+      contracts?: number;
+      side?: string;
+    } | null;
+    const size = Number(raw?.contracts ?? 0);
+    if (raw === null || !(size > 0) || (raw.side !== 'long' && raw.side !== 'short')) {
+      return null;
+    }
+    return { side: raw.side, size };
+  }
+
+  async fetchTotalBalance(currency: string): Promise<number> {
+    const balance = await this.connect().fetchBalance({ category: this.category });
+    const total = (balance.total ?? {}) as unknown as Record<string, number | undefined>;
+    return Number(total[currency] ?? 0);
   }
 
   async fetchServerTime(): Promise<number> {

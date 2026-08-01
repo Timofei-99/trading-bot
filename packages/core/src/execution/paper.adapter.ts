@@ -8,6 +8,7 @@ import {
   TradeJournalPort,
 } from '../domain/order';
 import { entryOrderId } from '../domain/order-id';
+import { fundingCharge, fundingEventsBetween } from './funding';
 import { LiveExecutionPort } from '../domain/ports';
 import { replayPaperJournal } from './paper-replay';
 import { Direction, Signal } from '../domain/signal';
@@ -18,6 +19,11 @@ export interface PaperAdapterOptions {
   readonly riskPerTrade?: number;
   /** Taker fee per side, charged on close like the backtest adapter. */
   readonly feeRate?: number;
+  /**
+   * Perpetuals only: funding rate per 8h interval (e.g. 0.0001 = 0.01%).
+   * Longs pay, shorts receive. Default 0 = spot semantics.
+   */
+  readonly fundingRatePer8h?: number;
   /** Adverse fill on market-like exits (SL, expiry, forced close). */
   readonly slippage?: number;
   /** Resolve a bar spanning both TP and SL against the trade. */
@@ -48,6 +54,7 @@ export class PaperAdapter implements LiveExecutionPort {
   balance: number;
   readonly riskPerTrade: number;
   readonly feeRate: number;
+  readonly fundingRatePer8h: number;
   readonly slippage: number;
   readonly worstCase: boolean;
   readonly entryTimeoutMs: number;
@@ -62,6 +69,7 @@ export class PaperAdapter implements LiveExecutionPort {
     this.balance = options.initialBalance ?? 10_000;
     this.riskPerTrade = options.riskPerTrade ?? 0.01;
     this.feeRate = options.feeRate ?? 0;
+    this.fundingRatePer8h = options.fundingRatePer8h ?? 0;
     this.slippage = options.slippage ?? 0;
     this.worstCase = options.worstCase ?? false;
     this.entryTimeoutMs = options.entryTimeoutMs ?? 60 * 60_000;
@@ -149,7 +157,25 @@ export class PaperAdapter implements LiveExecutionPort {
 
   async sync(snapshot: MarketSnapshot): Promise<SyncResult> {
     const { symbol, candle } = snapshot;
+    const previous = this.lastSeen.get(symbol);
     this.lastSeen.set(symbol, { close: candle.close, time: candle.time });
+
+    if (this.fundingRatePer8h !== 0) {
+      const held = this.openPositions.get(symbol);
+      if (held !== undefined) {
+        const since = Math.max(previous?.time ?? held.entryTime, held.entryTime);
+        const events = fundingEventsBetween(since, candle.time);
+        if (events > 0) {
+          held.fundingCost += fundingCharge(
+            held.signal.direction,
+            held.positionSize,
+            candle.close,
+            this.fundingRatePer8h,
+            events,
+          );
+        }
+      }
+    }
 
     const settledEntries: EntryOrder[] = [];
     const closed: Trade[] = [];
@@ -309,6 +335,9 @@ export class PaperAdapter implements LiveExecutionPort {
         ? trade.positionSize * (price - trade.entryPrice)
         : trade.positionSize * (trade.entryPrice - price);
     this.balance += dollarPnl;
+    if (trade.fundingCost !== 0) {
+      this.balance -= trade.fundingCost;
+    }
     if (this.feeRate !== 0) {
       this.balance -= trade.positionSize * (trade.entryPrice + price) * this.feeRate;
     }

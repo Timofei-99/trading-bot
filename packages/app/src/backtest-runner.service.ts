@@ -36,6 +36,8 @@ export interface BacktestRequest {
     readonly slippage?: number;
     /** Resolve a TP+SL bar against the trade. Default false. */
     readonly worstCase?: boolean;
+    /** Perpetuals: funding per 8h interval; longs pay, shorts receive. */
+    readonly fundingRatePer8h?: number;
     /** Daily realized-loss cap; entries pause for the rest of the UTC day. */
     readonly maxDailyDrawdown?: number;
   };
@@ -97,6 +99,7 @@ export class BacktestRunnerService {
       feeRate: request.account?.feeRate,
       slippage: request.account?.slippage,
       worstCase: request.account?.worstCase,
+      fundingRatePer8h: request.account?.fundingRatePer8h,
     });
 
     const maxDailyDrawdown = request.account?.maxDailyDrawdown;
